@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const OrganizationSchema = new mongoose.Schema({
+const OrganisationSchema = new mongoose.Schema({
   name: { type: String, required: true },
   city: { type: mongoose.Schema.Types.ObjectId, ref: "City", required: true },
   date: { type: String},
@@ -8,4 +8,4 @@ const OrganizationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model("Organization", OrganizationSchema); 
+module.exports = mongoose.model("Organisation", OrganisationSchema); 

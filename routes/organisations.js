@@ -1,30 +1,32 @@
 const express = require("express");
 const router = express.Router();
-const Club = require("../models/organization");
+const Organisation = require("../models/organisation");
 const auth = require("../middleware/auth");
 
 //bunu ayarla
 
 // Kulüp oluştur (sadece admin)
-router.post("/", auth, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    // if (req.user.role !== "Admin") {
+    //   return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    // }
+
+    const { name, cityId, date, status } = req.body;
+    if (!name || !cityId || !date || !status) {
+      return res.status(400).json({ message: "Organizasyon adı ve şehir ID'si gereklidir" });
     }
 
-    const { name, cityId } = req.body;
-    if (!name || !cityId) {
-      return res.status(400).json({ message: "Kulüp adı ve şehir ID'si gereklidir" });
-    }
-
-    const club = new Club({
+    const organisation = new Organisation({
       name,
-      city: cityId
+      city: cityId,
+      date,
+     status
     });
-    await club.save();
+    await organisation.save();
     
-    const populatedClub = await Club.findById(club._id).populate('city');
-    res.status(201).json(populatedClub);
+    const populatedOrganisation = await Organisation.findById(organisation._id).populate('city');
+    res.status(201).json(populatedOrganisation);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -33,53 +35,65 @@ router.post("/", auth, async (req, res) => {
 // Tüm kulüpleri getir
 router.get("/", async (req, res) => {
   try {
-    const clubs = await Club.find().populate('city').sort({ name: 1 });
-    res.status(200).json(clubs);
+    const organisations = await Organisation.find().populate('city').sort({ name: 1 });
+    res.status(200).json(organisations);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
+router.get("/:id",async (req, res) => {
+    try {
+        const organisation = await Organisation.findById(req.params.id).populate('city');
+        if (!organisation) {
+        return res.status(404).json({ message: "Organizasyon bulunamadı" });
+        }
+        res.status(200).json(organisation);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+    });
+
 // Kulüp güncelle (sadece admin)
-router.put("/:id", auth, async (req, res) => {
+router.put("/:id",  async (req, res) => {
   try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    // if (req.user.role !== "Admin") {
+    //   return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    // }
+
+    const { name, cityId, date, status } = req.body;
+    if (!name || !cityId || !date || !status) {
+      return res.status(400).json({ message: "Organizasyon adı ve şehir ID'si gereklidir" });
     }
 
-    const { name, cityId } = req.body;
-    if (!name || !cityId) {
-      return res.status(400).json({ message: "Kulüp adı ve şehir ID'si gereklidir" });
-    }
-
-    const club = await Club.findByIdAndUpdate(
+    const organisation = await Organisation.findByIdAndUpdate(
       req.params.id,
       { name, city: cityId },
       { new: true }
     ).populate('city');
 
-    if (!club) {
-      return res.status(404).json({ message: "Kulüp bulunamadı" });
+    if (!organisation) {
+      return res.status(404).json({ message: "Organizasyon bulunamadı" });
     }
 
-    res.status(200).json(club);
+    res.status(200).json(organisation);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
 // Kulüp sil (sadece admin)
-router.delete("/:id", auth, async (req, res) => {
+router.delete("/:id",  async (req, res) => {
   try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
-    }
+    // if (req.user.role !== "Admin") {
+    //   return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    // }
 
-    const club = await Club.findByIdAndDelete(req.params.id);
-    if (!club) {
-      return res.status(404).json({ message: "Kulüp bulunamadı" });
+    const organisation = await Organisation.findByIdAndDelete(req.params.id);
+    if (!organisation) {
+      return res.status(404).json({ message: "Organizasyon bulunamadı" });
     }
-    res.status(200).json({ message: "Kulüp başarıyla silindi" });
+    res.status(200).json({ message: "Organizasyon başarıyla silindi" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

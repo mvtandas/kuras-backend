@@ -265,6 +265,264 @@ router.get("/get-athlete/:id", async (req, res) => {
   }
 });
 
+
+
+router.post("/create-coach", async (req, res) => {
+  const {
+    name,
+    surname,
+    gender,
+    birthDate,
+    fatherName,
+    motherName,
+    cityId,
+    clubId,
+    roleId,
+    sportStartDate,
+    athleteLicenseNo,
+    email,
+    password,
+    identityNumber
+  } = req.body;
+
+  // Tüm gerekli alanların kontrolü
+  if (!name || !surname || !gender || !birthDate || !fatherName || 
+      !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+      !email || !password || !identityNumber) {
+    return res.status(400).json({ message: "Tüm alanlar zorunludur" });
+  }
+
+  try {
+    // Role, City ve Club varlığını kontrol et
+    const [role, city, club] = await Promise.all([
+      Role.findById(roleId),
+      City.findById(cityId),
+      Club.findById(clubId)
+    ]);
+
+    if (!role || !city || !club) {
+      return res.status(404).json({ 
+        message: "Rol, şehir veya kulüp bulunamadı" 
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({
+      name,
+      surname,
+      gender,
+      birthDate,
+      fatherName,
+      motherName,
+      city: cityId,
+      club: clubId,
+      role: roleId,
+      sportStartDate,
+      athleteLicenseNo,
+      email,
+      password: hashedPassword
+    });
+
+    await user.save();
+    
+    // Şifre hariç kullanıcı bilgilerini döndür
+    const userResponse = await User.findById(user._id)
+      .select('-password')
+      .populate(['role', 'city', 'club']);
+      
+    res.status(201).json(userResponse);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post("/update-coach/:id", async (req, res) => {
+  const {
+    name,
+    surname,
+    gender,
+    birthDate,
+    fatherName,
+    motherName,
+    cityId,
+    clubId,
+    roleId,
+    sportStartDate,
+    athleteLicenseNo,
+    email,
+    identityNumber,
+    bloodType,
+    religion,
+    nationality,
+    serialNumber,
+    educationStatus,
+    language,
+    bankInfo,
+    passportInfo,
+    workPhone,
+    workAddress,
+    homePhone,
+    homeAddress,
+    mobilePhone,
+    website,
+    showInStatistics,
+    licenseNo,
+    startDate,
+    province,
+    district,
+    institutionPosition,
+    isAthlete,
+    isVisuallyImpairedAthlete,
+    isHearingImpairedAthlete,
+    coachVisaYear,
+    isCoach,
+    coachStatus,
+    isReferee,
+    refereeVisaYear,
+    isProvincialRepresentative,
+    isStaff,
+    isBoardMember,
+    boardDuty,
+    promotion,
+    promotionDate,
+    
+  } = req.body;
+
+  // Tüm gerekli alanların kontrolü
+  if (!name || !surname || !gender || !birthDate || !fatherName || 
+      !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+      !email || !identityNumber) {
+    return res.status(400).json({ message: "Tüm alanlar zorunludur" });
+  }
+
+  try {
+    // Role, City ve Club varlığını kontrol et
+    const [role, city, club] = await Promise.all([
+      Role.findById(roleId),
+      City.findById(cityId),
+      Club.findById(clubId)
+    ]);
+
+    if (!role || !city || !club) {
+      return res.status(404).json({ 
+        message: "Rol, şehir veya kulüp bulunamadı" 
+      });
+    }
+
+    // Güncelleme işlemi
+    const coach = await User.findById(req.params.id);
+    if (!coach) {
+      return res.status(404).json({ message: "Antrenör bulunamadı" });
+    }
+
+    Object.assign(coach, {
+      name,
+      surname,
+      gender,
+      birthDate,
+      fatherName,
+      motherName,
+      cityId,
+      clubId,
+      roleId,
+      sportStartDate,
+      athleteLicenseNo,
+      email,
+      identityNumber,
+      bloodType,
+      religion,
+      nationality,
+      serialNumber,
+      educationStatus,
+      language,
+      bankInfo,
+      passportInfo,
+      workPhone,
+      workAddress,
+      homePhone,
+      homeAddress,
+      mobilePhone,
+      website,
+      showInStatistics,
+      licenseNo,
+      startDate,
+      province,
+      district,
+      institutionPosition,
+      isAthlete,
+      isVisuallyImpairedAthlete,
+      isHearingImpairedAthlete,
+      coachVisaYear,
+      isCoach,
+      coachStatus,
+      isReferee,
+      refereeVisaYear,
+      isProvincialRepresentative,
+      isStaff,
+      isBoardMember,
+      boardDuty,
+      promotion,
+      promotionDate,
+    });
+
+    // Kaydet ve yanıt dön
+    await coach.save();
+
+    res.status(200).json({ message: "Antrenör başarıyla güncellendi", coach });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+
+});
+
+router.post("/delete-coach/:id", async (req, res) => {
+  try {
+    const coach = await User.findByIdAndDelete(req.params.id);
+    if (!coach) {
+      return res.status(404).json({ message: "Antrenör bulunamadı" });
+    }
+
+    res.status(200).json({ message: "Antrenör başarıyla silindi" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.get("/get-coaches", async (req, res) => {
+  try {
+    const role = await Role.findOne({ name: "Coach" });
+    const coaches = await User.find({ role: role._id })
+      .select("-password")
+      .populate(["role", "city", "club"]);
+
+    res.status(200).json(coaches);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.get("/get-coach/:id", async (req, res) => {
+  try {
+    const coach = await User.findById(req.params.id)
+      .select("-password")
+      .populate(["role", "city", "club"]);
+
+    if (!coach) {
+      return res.status(404).json({ message: "Antrenör bulunamadı" });
+    }
+
+    res.status(200).json(coach);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+
+
 // Login a user
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;

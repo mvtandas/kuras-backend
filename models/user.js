@@ -11,11 +11,11 @@ const UserSchema = new mongoose.Schema({
   club: { type: mongoose.Schema.Types.ObjectId, ref: "Club" },
   role: { type: mongoose.Schema.Types.ObjectId, ref: "Role"},
   sportStartDate: { type: Date },
-  athleteLicenseNo: { type: String, unique: true },
+  athleteLicenseNo: { type: String},
   email: { type: String, unique: true },
   password: { type: String, }, // Hashed password
   createdAt: { type: Date, default: Date.now },
-  identityNumber: { type: String, unique: true },
+  identityNumber: { type: String},
   nationality: { type: String },
   serialNumber: { type: String },
   bloodType: { type: String },

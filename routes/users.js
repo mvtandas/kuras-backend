@@ -1249,15 +1249,15 @@ router.get("/get-personel/:id", async (req, res) => {
 
 // Login a user
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password,type } = req.body;
 
-  if (!email || !password)
+  if (!email || !password || !type)
     return res.status(400).json({ message: "Email and password are required" });
 
   try {
     const user = await User.findOne({ email }).populate("role");
     if (!user) return res.status(404).json({ message: "User not found" });
-
+    if(user.role.name !== type) return res.status(404).json({ message: "User not found" });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 

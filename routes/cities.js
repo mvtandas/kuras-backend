@@ -6,9 +6,9 @@ const auth = require("../middleware/auth");
 // Şehir oluştur (sadece admin)
 router.post("/", auth, async (req, res) => {
   try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
-    }
+    // if (req.user.role !== "Admin") {
+    //   return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    // }
 
     const { name } = req.body;
     if (!name) {

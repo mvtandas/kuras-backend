@@ -1,14 +1,16 @@
 const express = require("express");
 const router = express.Router();
-const Club = require("../models/club");
+const Club = require("../models/organization");
 const auth = require("../middleware/auth");
 
+//bunu ayarla
+
 // Kulüp oluştur (sadece admin)
-router.post("/", async (req, res) => {
+router.post("/", auth, async (req, res) => {
   try {
-    // if (req.user.role !== "Admin") {
-    //   return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
-    // }
+    if (req.user.role !== "Admin") {
+      return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
+    }
 
     const { name, cityId } = req.body;
     if (!name || !cityId) {

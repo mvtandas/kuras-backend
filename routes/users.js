@@ -10,7 +10,7 @@ const City = require("../models/city");
 const Club = require("../models/club");
 
 // Create a user
-router.post("/", async (req, res) => {
+router.post("/create-athlete", async (req, res) => {
   const {
     name,
     surname,
@@ -24,13 +24,14 @@ router.post("/", async (req, res) => {
     sportStartDate,
     athleteLicenseNo,
     email,
-    password
+    password,
+    identityNumber
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
       !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
-      !email || !password) {
+      !email || !password || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
 
@@ -62,7 +63,8 @@ router.post("/", async (req, res) => {
       sportStartDate,
       athleteLicenseNo,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      identityNumber,
     });
 
     await user.save();
@@ -75,6 +77,191 @@ router.post("/", async (req, res) => {
     res.status(201).json(userResponse);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+router.post("/update-athlete/:id", async (req, res) => {
+  const {
+    name,
+    surname,
+    gender,
+    birthDate,
+    fatherName,
+    motherName,
+    cityId,
+    clubId,
+    roleId,
+    sportStartDate,
+    athleteLicenseNo,
+    email,
+    identityNumber,
+    bloodType,
+    religion,
+    nationality,
+    serialNumber,
+    educationStatus,
+    language,
+    bankInfo,
+    passportInfo,
+    workPhone,
+    workAddress,
+    homePhone,
+    homeAddress,
+    mobilePhone,
+    website,
+    coach,
+    showInStatistics,
+    licenseNo,
+    startDate,
+    province,
+    district,
+    institutionPosition,
+    isAthlete,
+    isVisuallyImpairedAthlete,
+    isHearingImpairedAthlete,
+    coachVisaYear,
+    isCoach,
+    coachStatus,
+    isReferee,
+    refereeVisaYear,
+    isProvincialRepresentative,
+    isStaff,
+    isBoardMember,
+    athleteAchievements,
+    
+  } = req.body;
+
+  // Tüm gerekli alanların kontrolü
+  if (
+    !name || !surname || !gender || !birthDate || !fatherName || 
+    !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+    !email || !identityNumber
+  ) {
+    return res.status(400).json({ message: "Tüm alanlar zorunludur" });
+  }
+
+  try {
+    // Role, City ve Club varlığını kontrol et
+    const [role, city, club] = await Promise.all([
+      Role.findById(roleId),
+      City.findById(cityId),
+      Club.findById(clubId)
+    ]);
+
+    if (!role || !city || !club) {
+      return res.status(404).json({ 
+        message: "Rol, şehir veya kulüp bulunamadı" 
+      });
+    }
+
+    // Güncelleme işlemi
+    const athlete = await User.findById(req.params.id);
+    if (!athlete) {
+      return res.status(404).json({ message: "Sporcu bulunamadı" });
+    }
+
+    // Verilen tüm alanları güncelle
+    Object.assign(athlete, {
+      name,
+      surname,
+      gender,
+      birthDate,
+      fatherName,
+      motherName,
+      city: cityId,
+      club: clubId,
+      role: roleId,
+      sportStartDate,
+      athleteLicenseNo,
+      email,
+      identityNumber,
+      bloodType,
+      religion,
+      nationality,
+      serialNumber,
+      educationStatus,
+      language,
+      bankInfo,
+      passportInfo,
+      workPhone,
+      workAddress,
+      homePhone,
+      homeAddress,
+      mobilePhone,
+      website,
+      coach,
+      showInStatistics,
+      licenseNo,
+      startDate,
+      province,
+      district,
+      institutionPosition,
+      isAthlete,
+      isVisuallyImpairedAthlete,
+      isHearingImpairedAthlete,
+      coachVisaYear,
+      isCoach,
+      coachStatus,
+      isReferee,
+      refereeVisaYear,
+      isProvincialRepresentative,
+      isStaff,
+      isBoardMember,
+      athleteAchievements
+    });
+
+    // Kaydet ve yanıt dön
+    await athlete.save();
+
+    res.status(200).json({ message: "Sporcu başarıyla güncellendi", athlete });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.post("/delete-athlete/:id", async (req, res) => {
+  try {
+    const athlete = await User.findByIdAndDelete(req.params.id);
+    if (!athlete) {
+      return res.status(404).json({ message: "Sporcu bulunamadı" });
+    }
+
+    res.status(200).json({ message: "Sporcu başarıyla silindi" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.get("/get-athletes", async (req, res) => {
+  try {
+    const role = await Role.findOne({ name: "Athlete" });
+    const athletes = await User.find({ role: role._id })
+      .select("-password")
+      .populate(["role", "city", "club"]);
+
+    res.status(200).json(athletes);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.get("/get-athlete/:id", async (req, res) => {
+   try {
+    const athlete = await User.findById(req.params.id)
+      .select("-password")
+      .populate(["role", "city", "club"]);
+
+    if (!athlete) {
+      return res.status(404).json({ message: "Sporcu bulunamadı" });
+    }
+
+    res.status(200).json(athlete);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
   }
 });
 

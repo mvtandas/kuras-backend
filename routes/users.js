@@ -20,17 +20,18 @@ router.post("/create-athlete", async (req, res) => {
     motherName,
     cityId,
     clubId,
-    roleId,
     sportStartDate,
     athleteLicenseNo,
     email,
     password,
-    identityNumber
+    identityNumber,
+    belt,
+    weight
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+      !motherName || !cityId || !clubId || !sportStartDate || 
       !email || !password || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
@@ -38,7 +39,7 @@ router.post("/create-athlete", async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Athlete" }),
       City.findById(cityId),
       Club.findById(clubId)
     ]);
@@ -48,6 +49,8 @@ router.post("/create-athlete", async (req, res) => {
         message: "Rol, şehir veya kulüp bulunamadı" 
       });
     }
+
+    const isAthlete = true;
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({
@@ -59,12 +62,15 @@ router.post("/create-athlete", async (req, res) => {
       motherName,
       city: cityId,
       club: clubId,
-      role: roleId,
+      role: role._id,
       sportStartDate,
       athleteLicenseNo,
       email,
       password: hashedPassword,
       identityNumber,
+      isAthlete: true,
+      belt,
+      weight
     });
 
     await user.save();
@@ -90,7 +96,6 @@ router.post("/update-athlete/:id", async (req, res) => {
     motherName,
     cityId,
     clubId,
-    roleId,
     sportStartDate,
     athleteLicenseNo,
     email,
@@ -115,26 +120,15 @@ router.post("/update-athlete/:id", async (req, res) => {
     startDate,
     province,
     district,
-    institutionPosition,
-    isAthlete,
     isVisuallyImpairedAthlete,
     isHearingImpairedAthlete,
-    coachVisaYear,
-    isCoach,
-    coachStatus,
-    isReferee,
-    refereeVisaYear,
-    isProvincialRepresentative,
-    isStaff,
-    isBoardMember,
     athleteAchievements,
-    
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
   if (
     !name || !surname || !gender || !birthDate || !fatherName || 
-    !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+    !motherName || !cityId || !clubId || !sportStartDate || 
     !email || !identityNumber
   ) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
@@ -143,7 +137,7 @@ router.post("/update-athlete/:id", async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Athlete" }),
       City.findById(cityId),
       Club.findById(clubId)
     ]);
@@ -170,7 +164,7 @@ router.post("/update-athlete/:id", async (req, res) => {
       motherName,
       city: cityId,
       club: clubId,
-      role: roleId,
+      role: role._id,
       sportStartDate,
       athleteLicenseNo,
       email,
@@ -195,18 +189,8 @@ router.post("/update-athlete/:id", async (req, res) => {
       startDate,
       province,
       district,
-      institutionPosition,
-      isAthlete,
       isVisuallyImpairedAthlete,
       isHearingImpairedAthlete,
-      coachVisaYear,
-      isCoach,
-      coachStatus,
-      isReferee,
-      refereeVisaYear,
-      isProvincialRepresentative,
-      isStaff,
-      isBoardMember,
       athleteAchievements
     });
 
@@ -277,7 +261,6 @@ router.post("/create-coach", async (req, res) => {
     motherName,
     cityId,
     clubId,
-    roleId,
     sportStartDate,
     athleteLicenseNo,
     email,
@@ -287,7 +270,7 @@ router.post("/create-coach", async (req, res) => {
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+      !motherName || !cityId || !clubId || 
       !email || !password || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
@@ -295,7 +278,7 @@ router.post("/create-coach", async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Coach" }),
       City.findById(cityId),
       Club.findById(clubId)
     ]);
@@ -316,11 +299,12 @@ router.post("/create-coach", async (req, res) => {
       motherName,
       city: cityId,
       club: clubId,
-      role: roleId,
+      role: role._id,
       sportStartDate,
       athleteLicenseNo,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      isCoach: true
     });
 
     await user.save();
@@ -346,9 +330,7 @@ router.post("/update-coach/:id", async (req, res) => {
     motherName,
     cityId,
     clubId,
-    roleId,
     sportStartDate,
-    athleteLicenseNo,
     email,
     identityNumber,
     bloodType,
@@ -371,26 +353,16 @@ router.post("/update-coach/:id", async (req, res) => {
     province,
     district,
     institutionPosition,
-    isAthlete,
-    isVisuallyImpairedAthlete,
-    isHearingImpairedAthlete,
     coachVisaYear,
     isCoach,
     coachStatus,
-    isReferee,
-    refereeVisaYear,
-    isProvincialRepresentative,
-    isStaff,
-    isBoardMember,
-    boardDuty,
     promotion,
     promotionDate,
-    
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !clubId || !roleId || !sportStartDate || 
+      !motherName || !cityId || !clubId || 
       !email || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
@@ -398,7 +370,7 @@ router.post("/update-coach/:id", async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Coach" }),
       City.findById(cityId),
       Club.findById(clubId)
     ]);
@@ -422,11 +394,10 @@ router.post("/update-coach/:id", async (req, res) => {
       birthDate,
       fatherName,
       motherName,
-      cityId,
-      clubId,
-      roleId,
+      city: cityId,
+      club: clubId,
+      role: role._id,
       sportStartDate,
-      athleteLicenseNo,
       email,
       identityNumber,
       bloodType,
@@ -449,18 +420,9 @@ router.post("/update-coach/:id", async (req, res) => {
       province,
       district,
       institutionPosition,
-      isAthlete,
-      isVisuallyImpairedAthlete,
-      isHearingImpairedAthlete,
       coachVisaYear,
       isCoach,
       coachStatus,
-      isReferee,
-      refereeVisaYear,
-      isProvincialRepresentative,
-      isStaff,
-      isBoardMember,
-      boardDuty,
       promotion,
       promotionDate,
     });
@@ -572,7 +534,6 @@ router.post("/create-referee", async (req, res) => {
     fatherName,
     motherName,
     cityId,
-    roleId,
     sportStartDate,
     athleteLicenseNo,
     email,
@@ -583,7 +544,7 @@ router.post("/create-referee", async (req, res) => {
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !roleId || !sportStartDate || 
+      !motherName || !cityId || 
       !email || !password || !identityNumber || !refereeStatus) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
@@ -591,7 +552,7 @@ router.post("/create-referee", async (req, res) => {
   try {
     // Role, City varlığını kontrol et
     const [role, city] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Referee" }),
       City.findById(cityId),
     ]);
 
@@ -610,11 +571,12 @@ router.post("/create-referee", async (req, res) => {
       fatherName,
       motherName,
       city: cityId,
-      role: roleId,
+      role: role._id,
       sportStartDate,
       athleteLicenseNo,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      isReferee: true,
     });
 
     await user.save();
@@ -639,9 +601,7 @@ router.post("/update-referee/:id", async (req, res) => {
     fatherName,
     motherName,
     cityId,
-    roleId,
     sportStartDate,
-    athleteLicenseNo,
     email,
     identityNumber,
     bloodType,
@@ -664,23 +624,14 @@ router.post("/update-referee/:id", async (req, res) => {
     province,
     district,
     institutionPosition,
-    isAthlete,
-    isVisuallyImpairedAthlete,
-    isHearingImpairedAthlete,
-    coachVisaYear,
-    isCoach,
-    coachStatus,
     isReferee,
     refereeVisaYear,
-    isProvincialRepresentative,
-    isStaff,
-    isBoardMember,
     refereeStatus,
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-    !motherName || !cityId || !roleId || !sportStartDate || 
+    !motherName || !cityId || 
     !email || !identityNumber || !refereeStatus) {
   return res.status(400).json({ message: "Tüm alanlar zorunludur" });
 }
@@ -691,7 +642,7 @@ try {
 
   // Role, City ve Club varlığını kontrol et
   const [role, city] = await Promise.all([
-    Role.findById(roleId),
+    Role.findOne({ name: "Referee" }),
     City.findById(cityId),
   ]);
 
@@ -719,9 +670,8 @@ try {
     fatherName,
     motherName,
     city: cityId,
-    role: roleId,
+    role: role._id,
     sportStartDate,
-    athleteLicenseNo,
     email,
     identityNumber,
     bloodType,
@@ -744,17 +694,8 @@ try {
     province,
     district,
     institutionPosition,
-    isAthlete,
-    isVisuallyImpairedAthlete,
-    isHearingImpairedAthlete,
-    coachVisaYear,
-    isCoach,
-    coachStatus,
     isReferee,
     refereeVisaYear,
-    isProvincialRepresentative,
-    isStaff,
-    isBoardMember,
     refereeStatus
   });
 
@@ -824,7 +765,6 @@ router.post("/create-representetive", async (req, res) => {
     fatherName,
     motherName,
     cityId,
-    roleId,
     sportStartDate,
     email,
     password,
@@ -833,7 +773,7 @@ router.post("/create-representetive", async (req, res) => {
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !roleId || !sportStartDate || 
+      !motherName || !cityId || 
       !email || !password || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
@@ -841,7 +781,7 @@ router.post("/create-representetive", async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Representetive" }),
       City.findById(cityId),
     ]);
 
@@ -860,10 +800,11 @@ router.post("/create-representetive", async (req, res) => {
       fatherName,
       motherName,
       city: cityId,
-      role: roleId,
+      role: role._id,
       sportStartDate,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      isProvincialRepresentative: true,
     });
 
     await user.save();
@@ -888,7 +829,6 @@ router.post("/update-representetive/:id", async (req, res) => {
     fatherName,
     motherName,
     cityId,
-    roleId,
     sportStartDate,
     email,
     identityNumber,
@@ -912,25 +852,14 @@ router.post("/update-representetive/:id", async (req, res) => {
     province,
     district,
     institutionPosition,
-    isAthlete,
-    isVisuallyImpairedAthlete,
-    isHearingImpairedAthlete,
-    coachVisaYear,
-    isCoach,
-    coachStatus,
-    isReferee,
-    refereeVisaYear,
     isProvincialRepresentative,
-    isStaff,
-    isBoardMember,
-    boardDuty,
     promotion,
     promotionDate,
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !roleId || !sportStartDate || 
+      !motherName || !cityId || 
       !email || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
@@ -938,7 +867,7 @@ router.post("/update-representetive/:id", async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Representetive" }),
       City.findById(cityId),
     ]);
 
@@ -961,8 +890,8 @@ router.post("/update-representetive/:id", async (req, res) => {
       birthDate,
       fatherName,
       motherName,
-      cityId,
-      roleId,
+      city: cityId,
+      role: role._id,
       sportStartDate,
       email,
       identityNumber,
@@ -986,18 +915,7 @@ router.post("/update-representetive/:id", async (req, res) => {
       province,
       district,
       institutionPosition,
-      isAthlete,
-      isVisuallyImpairedAthlete,
-      isHearingImpairedAthlete,
-      coachVisaYear,
-      isCoach,
-      coachStatus,
-      isReferee,
-      refereeVisaYear,
       isProvincialRepresentative,
-      isStaff,
-      isBoardMember,
-      boardDuty,
       promotion,
       promotionDate,
     });
@@ -1114,7 +1032,8 @@ router.post("/create-personel", async (req, res) => {
       sportStartDate,
       athleteLicenseNo,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      isStaff: true,
     });
 
     await user.save();
@@ -1249,15 +1168,14 @@ router.get("/get-personel/:id", async (req, res) => {
 
 // Login a user
 router.post("/login", async (req, res) => {
-  const { email, password,type } = req.body;
+  const { email, password } = req.body;
 
-  if (!email || !password || !type)
+  if (!email || !password)
     return res.status(400).json({ message: "Email and password are required" });
 
   try {
     const user = await User.findOne({ email }).populate("role");
     if (!user) return res.status(404).json({ message: "User not found" });
-    if(user.role.name !== type) return res.status(404).json({ message: "User not found" });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
@@ -1328,6 +1246,67 @@ router.get("/", auth, async (req, res) => {
     res.status(200).json(users);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+
+// Kullanıcı rolünü değiştir (SADECE ADMIN)
+router.put("/change-role/:userId", auth, async (req, res) => {
+  try {
+    // Admin kontrolü
+    const adminUser = await User.findById(req.user.id).populate("role");
+    if (adminUser.role.name !== "Admin") {
+      return res.status(403).json({ message: "Bu işlem için yetkiniz yok" });
+    }
+
+    const { userId } = req.params;
+    const { newRoleName } = req.body;
+
+    // Rol varlık kontrolü
+    const newRole = await Role.findOne({ name: newRoleName });
+    if (!newRole) {
+      return res.status(404).json({ message: "Belirtilen rol bulunamadı" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    user.isAthlete = false;
+    user.isCoach = false;
+    user.isReferee = false;
+    user.isProvincialRepresentative = false;
+
+    user.role = newRole._id;
+    switch (newRoleName) {
+      case "Athlete":
+        user.isAthlete = true;
+        break;
+      case "Coach":
+        user.isCoach = true;
+        break;
+      case "Referee":
+        user.isReferee = true;
+        break;
+      case "Representetive": 
+        user.isProvincialRepresentative = true;
+        break;
+    }
+
+    await user.save();
+    
+    const updatedUser = await User.findById(userId)
+      .select("-password")
+      .populate("role");
+      
+    res.status(200).json({
+      message: "Rol başarıyla değiştirildi",
+      user: updatedUser
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 

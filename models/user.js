@@ -62,6 +62,8 @@ const UserSchema = new mongoose.Schema({
   wins: { type: Number, default: 0 },
   losses: { type: Number, default: 0 },
   success: { type: String },
+  weight: { type: Number },
+  belt: { type: String },
   athleteAchievements: [
     {
       rank: { type: Number },

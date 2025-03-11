@@ -93,11 +93,23 @@ router.post("/:id/participants", auth, async (req, res) => {
     console.log("athletes", athletes);
 
     // Sporcu ve yaş/kemer kontrolü
-    const validAthletes = athletes.filter(athlete => {
+    const validAthletes = athletes.filter(async athlete => {
       const isAthlete = athlete.role.name === "Athlete";
       const ageValid = checkBirthDate(athlete.birthDate, organisation.birthDateRequirements);
-      const beltValid = organisation.beltRequirement.length === 0 || 
-                        organisation.beltRequirement.includes(athlete.belt);
+      
+      // Kemer kontrolü
+      let beltValid = true;
+      if (organisation.beltRequirement.length > 0) {
+        if (athlete.belt) {
+          // Kemer referansını doldur
+          await athlete.populate('belt');
+          // Kemer adı ile kontrol et
+          beltValid = organisation.beltRequirement.includes(athlete.belt.name);
+        } else {
+          beltValid = false;
+        }
+      }
+      
       return isAthlete && ageValid && beltValid;
     });
 

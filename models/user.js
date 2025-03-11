@@ -63,7 +63,7 @@ const UserSchema = new mongoose.Schema({
   losses: { type: Number, default: 0 },
   success: { type: String },
   weight: { type: Number },
-  belt: { type: String },
+  belt: { type: mongoose.Schema.Types.ObjectId, ref: "Belt" },
   athleteAchievements: [
     {
       rank: { type: Number },

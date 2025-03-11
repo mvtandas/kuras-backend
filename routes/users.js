@@ -8,6 +8,7 @@ const BlacklistedToken = require("../models/blacklistedToken");
 const auth = require("../middleware/auth");
 const City = require("../models/city");
 const Club = require("../models/club");
+const Belt = require("../models/belt");
 
 // Create a user
 router.post("/create-athlete", async (req, res) => {
@@ -50,6 +51,17 @@ router.post("/create-athlete", async (req, res) => {
       });
     }
 
+    // Eğer belt bir string ise, ilgili Belt belgesini bul
+    let beltId = belt;
+    if (belt && typeof belt === 'string') {
+      const beltDoc = await Belt.findOne({ name: belt });
+      if (beltDoc) {
+        beltId = beltDoc._id;
+      } else {
+        return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
+      }
+    }
+
     const isAthlete = true;
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -69,7 +81,7 @@ router.post("/create-athlete", async (req, res) => {
       password: hashedPassword,
       identityNumber,
       isAthlete: true,
-      belt,
+      belt: beltId,
       weight
     });
 

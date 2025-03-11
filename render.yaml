@@ -15,4 +15,4 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: ALLOWED_ORIGIN
-        value: https://your-frontend-url.com 
+        value: "*"

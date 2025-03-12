@@ -3,7 +3,10 @@ const mongoose = require("mongoose");
 const OrganisationSchema = new mongoose.Schema({
   // Turnuva Bilgileri
   tournamentName: { type: String, required: true }, // Turnuva Adı (Opsiyonel ama önerilir)
-  tournamentPlace: { type: String, required: true }, // Turnuva Yeri
+  tournamentPlace: { 
+    city: { type: mongoose.Schema.Types.ObjectId, ref: "City", required: true }, // Şehir referansı
+    venue: { type: String, required: true } // Spesifik mekan (salon, stadyum vb.)
+  },
   tournamentDate: { 
     startDate: { type: Date, required: true }, // Başlangıç Tarihi
     endDate: { type: Date } // Bitiş Tarihi (Opsiyonel)
@@ -14,25 +17,39 @@ const OrganisationSchema = new mongoose.Schema({
     minDate: { type: Date }, // Minimum Doğum Tarihi
     maxDate: { type: Date }  // Maksimum Doğum Tarihi
   },
-  beltRequirement: [{ type: String }], // İzin Verilen Kuşaklar (Örnek: ["Mavi", "Siyah"])
+  beltRequirement: { type: mongoose.Schema.Types.ObjectId, ref: "Belt" }, // İzin Verilen Kemer
   participationType: { 
     type: String, 
-    enum: ['Sporcu Erkek', 'Sporcu Kadın', 'Antrenör', 'Hakem'], 
+    enum: ['Sporcu Erkek', 'Sporcu Kadın', 'Hakem'], 
     required: true 
   }, // Katılım Tipi
   
-  // Katılımcılar (Sadece Sporcu Rolündeki Kullanıcılar)
+  // Katılımcılar (Detaylı Bilgilerle)
   participants: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    validate: {
-      validator: async function(userId) {
-        const user = await mongoose.model('User').findById(userId).populate('role');
-        return user.role.name === "Athlete"; // 'Sporcu' rolünün adını kontrol et
-      },
-      message: "Sadece sporcu rolündeki kullanıcılar eklenebilir!"
-    }
+    athlete: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      validate: {
+        validator: async function(userId) {
+          const user = await mongoose.model('User').findById(userId).populate('role');
+          return user.role.name === "Athlete"; // 'Sporcu' rolünün adını kontrol et
+        },
+        message: "Sadece sporcu rolündeki kullanıcılar eklenebilir!"
+      }
+    },
+    weight: { type: Number, required: true }, // Katılımcının kilosu
+    coach: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Sorumlu antrenör
+    addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // Ekleyen kullanıcı
+    addedAt: { type: Date, default: Date.now } // Eklenme tarihi
   }],
+
+  // Durum Bilgisi
+  status: { 
+    type: String, 
+    enum: ['Aktif', 'Pasif'], 
+    default: 'Aktif' 
+  },
 
   // Ek Bilgiler
   createdAt: { type: Date, default: Date.now }

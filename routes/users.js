@@ -90,7 +90,7 @@ router.post("/create-athlete", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select('-password')
-      .populate(['role', 'city', 'club']);
+      .populate(['role', 'city', 'club', 'belt']);
       
     res.status(201).json(userResponse);
   } catch (err) {
@@ -135,6 +135,8 @@ router.post("/update-athlete/:id", async (req, res) => {
     isVisuallyImpairedAthlete,
     isHearingImpairedAthlete,
     athleteAchievements,
+    belt,
+    weight
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -158,6 +160,17 @@ router.post("/update-athlete/:id", async (req, res) => {
       return res.status(404).json({ 
         message: "Rol, şehir veya kulüp bulunamadı" 
       });
+    }
+
+    // Eğer belt bir string ise, ilgili Belt belgesini bul
+    let beltId = belt;
+    if (belt && typeof belt === 'string') {
+      const beltDoc = await Belt.findOne({ name: belt });
+      if (beltDoc) {
+        beltId = beltDoc._id;
+      } else {
+        return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
+      }
     }
 
     // Güncelleme işlemi
@@ -203,7 +216,9 @@ router.post("/update-athlete/:id", async (req, res) => {
       district,
       isVisuallyImpairedAthlete,
       isHearingImpairedAthlete,
-      athleteAchievements
+      athleteAchievements,
+      belt: beltId,
+      weight
     });
 
     // Kaydet ve yanıt dön
@@ -233,9 +248,39 @@ router.post("/delete-athlete/:id", async (req, res) => {
 router.get("/get-athletes", async (req, res) => {
   try {
     const role = await Role.findOne({ name: "Athlete" });
-    const athletes = await User.find({ role: role._id })
+    
+    // Query parametrelerinden minBeltValue, minDate ve maxDate değerlerini al
+    const { minBeltValue, minDate, maxDate } = req.query;
+    
+    // Temel sorgu
+    let query = { role: role._id };
+    
+    // Eğer minBeltValue belirtilmişse, kemer değeri filtresini ekle
+    if (minBeltValue && !isNaN(Number(minBeltValue))) {
+      // Önce tüm kemerleri getir
+      const belts = await Belt.find({ value: { $gte: Number(minBeltValue) } });
+      const beltIds = belts.map(belt => belt._id);
+      
+      // Sorguya kemer filtresi ekle
+      query.belt = { $in: beltIds };
+    }
+    
+    // Doğum tarihi filtresini ekle
+    if (minDate || maxDate) {
+      query.birthDate = {};
+      
+      if (minDate) {
+        query.birthDate.$gte = new Date(minDate); // Minimum tarihten sonra doğanlar (daha genç)
+      }
+      
+      if (maxDate) {
+        query.birthDate.$lte = new Date(maxDate); // Maksimum tarihten önce doğanlar (daha yaşlı)
+      }
+    }
+    
+    const athletes = await User.find(query)
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     res.status(200).json(athletes);
   } catch (error) {
@@ -248,7 +293,7 @@ router.get("/get-athlete/:id", async (req, res) => {
    try {
     const athlete = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     if (!athlete) {
       return res.status(404).json({ message: "Sporcu bulunamadı" });
@@ -324,7 +369,7 @@ router.post("/create-coach", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select('-password')
-      .populate(['role', 'city', 'club']);
+      .populate(['role', 'city', 'club', 'belt']);
       
     res.status(201).json(userResponse);
   } catch (err) {
@@ -469,7 +514,7 @@ router.get("/get-coaches", async (req, res) => {
     const role = await Role.findOne({ name: "Coach" });
     const coaches = await User.find({ role: role._id })
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     res.status(200).json(coaches);
   } catch (error) {
@@ -482,7 +527,7 @@ router.get("/get-coach/:id", async (req, res) => {
   try {
     const coach = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     if (!coach) {
       return res.status(404).json({ message: "Antrenör bulunamadı" });
@@ -596,7 +641,7 @@ router.post("/create-referee", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select('-password')
-      .populate(['role', 'city', 'club']);
+      .populate(['role', 'city', 'club', 'belt']);
       
     res.status(201).json(userResponse);
   } catch (err) {
@@ -741,7 +786,7 @@ router.get("/get-referees", async (req, res) => {
     const role = await Role.findOne({ name: "Referee" });
     const referees = await User.find({ role: role._id })
       .select("-password")
-      .populate(["role", "city"]);
+      .populate(["role", "city", "belt"]);
 
     res.status(200).json(referees);
   } catch (error) {
@@ -754,7 +799,7 @@ router.get("/get-referee/:id", async (req, res) => {
     try {
       const referee = await User.findById(req.params.id)
         .select("-password")
-        .populate(["role", "city", "club"]);
+        .populate(["role", "city", "club", "belt"]);
   
       if (!referee) {
         return res.status(404).json({ message: "Hakem bulunamadı" });
@@ -824,7 +869,7 @@ router.post("/create-representetive", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select('-password')
-      .populate(['role', 'city', 'club']);
+      .populate(['role', 'city', 'club', 'belt']);
       
     res.status(201).json(userResponse);
   } catch (err) {
@@ -962,7 +1007,7 @@ router.get("/get-representetives", async (req, res) => {
     const role = await Role.findOne({ name: "Representetive" });
     const representetives = await User.find({ role: role._id })
       .select("-password")
-      .populate(["role", "city"]);
+      .populate(["role", "city", "belt"]);
 
     res.status(200).json(representetives);
   } catch (error) {
@@ -976,7 +1021,7 @@ router.get("/get-representetive/:id", async (req, res) => {
   try {
     const representetive = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     if (!representetive) {
       return res.status(404).json({ message: "Temsilci bulunamadı" });
@@ -1053,7 +1098,7 @@ router.post("/create-personel", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select('-password')
-      .populate(['role', 'city', 'club']);
+      .populate(['role', 'city', 'club', 'belt']);
       
     res.status(201).json(userResponse);
   } catch (err) {
@@ -1148,7 +1193,7 @@ router.get("/get-personels", async (req, res) => {
   try {
     const personels = await User.find({ role: "Personel" })
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     res.status(200).json(personels);
   } catch (error) {
@@ -1162,7 +1207,7 @@ router.get("/get-personel/:id", async (req, res) => {
   try {
     const personel = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club"]);
+      .populate(["role", "city", "club", "belt"]);
 
     if (!personel) {
       return res.status(404).json({ message: "Personel bulunamadı" });

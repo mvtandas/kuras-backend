@@ -73,7 +73,7 @@ const UserSchema = new mongoose.Schema({
       result: { type: String }
     }
   ],
-
+  participationType: { type: String, enum: ['Sporcu Erkek', 'Sporcu Kadın', 'Antrenör', 'Hakem'] }
 });
 
 module.exports = mongoose.model("User", UserSchema);

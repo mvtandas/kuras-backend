@@ -4,6 +4,12 @@ const Organisation = require("../models/organisation");
 const User = require("../models/user");
 const auth = require("../middleware/auth");
 const mongoose = require("mongoose");
+const Belt = require("../models/belt");
+const PDFDocument = require('pdfkit');
+const moment = require('moment');
+const City = require("../models/city");
+const fs = require('fs');
+const path = require('path');
 
 // ADMIN ONLY ROUTES
 // Organizasyon oluşturma (Sadece Admin)
@@ -15,10 +21,10 @@ router.post("/", auth, async (req, res) => {
       return res.status(403).json({ message: "Yetkiniz yok" });
     }
 
-    const { tournamentName, tournamentPlace, tournamentDate, birthDateRequirements, beltRequirement, participationType } = req.body;
+    const { tournamentName, tournamentPlace, tournamentDate, birthDateRequirements, beltRequirement } = req.body;
 
     // Zorunlu alan kontrolü
-    if (!tournamentPlace || !tournamentDate?.startDate || !participationType) {
+    if (!tournamentPlace || !tournamentDate?.startDate ) {
       return res.status(400).json({ message: "Zorunlu alanları doldurun" });
     }
 
@@ -28,7 +34,6 @@ router.post("/", auth, async (req, res) => {
       tournamentDate,
       birthDateRequirements,
       beltRequirement: beltRequirement || [],
-      participationType,
     });
 
     await organisation.save();
@@ -42,11 +47,10 @@ router.post("/", auth, async (req, res) => {
 router.get("/", auth, async (req, res) => {
   try {
     // Tarih filtresi için örnek query: ?startDate=2024-01-01
-    const { startDate, participationType } = req.query;
+    const { startDate } = req.query;
     const filter = {};
     
     if (startDate) filter["tournamentDate.startDate"] = { $gte: new Date(startDate) };
-    if (participationType) filter.participationType = participationType;
 
     const organisations = await Organisation.find(filter);
     res.json(organisations);
@@ -148,7 +152,24 @@ router.post("/:id/participants", auth, async (req, res) => {
       let beltValid = true;
       if (organisation.beltRequirement) {
         if (athlete.belt) {
-          beltValid = athlete.belt._id.toString() === organisation.beltRequirement.toString();
+          try {
+            // Gerekli kemer bilgisini al
+            const requiredBelt = await Belt.findById(organisation.beltRequirement);
+            
+            if (!requiredBelt) {
+              beltValid = false;
+            } else {
+              // Değerleri karşılaştır
+              const athleteBeltValue = athlete.belt.value;
+              const requiredBeltValue = requiredBelt.value;
+              
+              // Sporcunun kemer değeri, gereken değere eşit veya daha yüksek olmalı
+              beltValid = athleteBeltValue >= requiredBeltValue;
+            }
+          } catch (error) {
+            console.error("Kemer kontrolü hatası:", error);
+            beltValid = false;
+          }
         } else {
           beltValid = false;
         }
@@ -365,10 +386,11 @@ router.get("/:id/participants", auth, async (req, res) => {
     const organisation = await Organisation.findById(id)
       .populate({
         path: "participants.athlete",
-        select: "name surname birthDate gender belt weight club",
+        select: "name surname birthDate gender belt weight club city",
         populate: [
           { path: "belt", select: "name value" },
-          { path: "club", select: "name" }
+          { path: "club", select: "name" },
+          { path: "city", select: "name" }
         ]
       })
       .populate({
@@ -379,6 +401,10 @@ router.get("/:id/participants", auth, async (req, res) => {
         path: "participants.addedBy",
         select: "name surname role",
         populate: { path: "role", select: "name" }
+      })
+      .populate({
+        path: "tournamentPlace.city",
+        select: "name"
       });
     
     if (!organisation) {
@@ -397,7 +423,7 @@ router.get("/:id/participants", auth, async (req, res) => {
     }
     
     // Sıralama ve filtreleme seçenekleri
-    const { sortBy, sortOrder, weight, club, belt } = req.query;
+    const { sortBy, sortOrder, weight, club, belt, city } = req.query;
     
     // Filtreleme
     if (weight) {
@@ -418,6 +444,12 @@ router.get("/:id/participants", auth, async (req, res) => {
     if (belt) {
       participants = participants.filter(p => 
         p.athlete.belt && p.athlete.belt._id.toString() === belt
+      );
+    }
+    
+    if (city) {
+      participants = participants.filter(p => 
+        p.athlete.city && p.athlete.city._id.toString() === city
       );
     }
     
@@ -548,6 +580,732 @@ router.put("/:id/participants/:athleteId", auth, async (req, res) => {
     });
   } catch (error) {
     console.error("Katılımcı güncelleme hatası:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Organizasyon katılımcılarının PDF çıktısını al
+router.get("/:id/participants/export", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(req.user.id).populate("role");
+    
+    // Organizasyonu bul ve katılımcıları populate et
+    const organisation = await Organisation.findById(id)
+      .populate({
+        path: "participants.athlete",
+        select: "name surname birthDate gender belt weight club city",
+        populate: [
+          { path: "belt", select: "name value" },
+          { path: "club", select: "name" },
+          { path: "city", select: "name" }
+        ]
+      })
+      .populate({
+        path: "participants.coach",
+        select: "name surname"
+      })
+      .populate({
+        path: "participants.addedBy",
+        select: "name surname role",
+        populate: { path: "role", select: "name" }
+      })
+      .populate({
+        path: "tournamentPlace.city",
+        select: "name"
+      });
+    
+    if (!organisation) {
+      return res.status(404).json({ message: "Organizasyon bulunamadı" });
+    }
+    
+    // Kullanıcı rolüne göre katılımcıları filtrele
+    let participants = [...organisation.participants];
+    
+    // Antrenör ise, sadece kendi eklediği veya sorumlusu olduğu katılımcıları göster
+    if (user.role.name === "Coach") {
+      participants = participants.filter(p => 
+        p.addedBy._id.toString() === user.id.toString() || 
+        (p.coach && p.coach._id.toString() === user.id.toString())
+      );
+    }
+    
+    // Eksik kulüp bilgilerini tamamla
+    const Club = mongoose.model('Club'); // Kulüp modelini al
+    
+    // Tüm kulüpleri bir kerede getir
+    const clubIds = participants
+      .filter(p => p.athlete && p.athlete.club && typeof p.athlete.club === 'string')
+      .map(p => p.athlete.club);
+    
+    let clubs = {};
+    if (clubIds.length > 0) {
+      const clubsData = await Club.find({ _id: { $in: clubIds } }).select('name');
+      clubsData.forEach(club => {
+        clubs[club._id.toString()] = club.name;
+      });
+    }
+    
+    // Şehirlere göre katılımcıları gruplandır
+    const participantsByCity = {};
+    
+    participants.forEach(participant => {
+      if (participant.athlete && participant.athlete.city) {
+        const cityId = participant.athlete.city._id.toString();
+        const cityName = participant.athlete.city.name;
+        
+        if (!participantsByCity[cityId]) {
+          participantsByCity[cityId] = {
+            cityName,
+            participants: []
+          };
+        }
+        
+        // Kulüp bilgisini ekle
+        if (participant.athlete.club) {
+          if (typeof participant.athlete.club === 'string') {
+            const clubId = participant.athlete.club;
+            if (clubs[clubId]) {
+              participant.athlete.clubName = clubs[clubId];
+            }
+          } else if (participant.athlete.club.name) {
+            participant.athlete.clubName = participant.athlete.club.name;
+          }
+        }
+        
+        participantsByCity[cityId].participants.push(participant);
+      }
+    });
+    
+    // Her şehir için katılımcıları kiloya göre sırala
+    Object.values(participantsByCity).forEach(city => {
+      city.participants.sort((a, b) => a.weight - b.weight);
+    });
+    
+    // Renk tanımlamaları
+    const colors = {
+      primary: '#1e3a8a',      // Koyu mavi
+      secondary: '#3b82f6',    // Açık mavi
+      accent: '#f59e0b',       // Turuncu
+      light: '#f3f4f6',        // Açık gri
+      dark: '#1f2937',         // Koyu gri
+      white: '#ffffff',        // Beyaz
+      headerBg: '#e5e7eb',     // Başlık arkaplanı
+      tableBorder: '#d1d5db',  // Tablo çizgileri
+      tableRowAlt: '#f9fafb'   // Alternatif satır rengi
+    };
+    
+    // PDF oluştur - Yatay (Landscape) format
+    const doc = new PDFDocument({ 
+      size: 'A4',
+      layout: 'landscape', // Yatay format
+      margin: 50,
+      info: {
+        Title: 'Organizasyon Katılımcıları',
+        Author: 'Türkiye Kuraş Federasyonu',
+        Subject: organisation.tournamentName
+      }
+    });
+    
+    // PDF başlığını ayarla
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=participants-${id}.pdf`);
+    
+    // PDF'i response'a pipe et
+    doc.pipe(res);
+    
+    // Türkçe karakterleri ASCII karşılıklarıyla değiştiren yardımcı fonksiyon
+    function turkishToAscii(text) {
+      if (!text) return ''; // text undefined veya null ise boş string döndür
+      
+      return text
+        .replace(/ı/g, 'i')
+        .replace(/İ/g, 'I')
+        .replace(/ğ/g, 'g')
+        .replace(/Ğ/g, 'G')
+        .replace(/ü/g, 'u')
+        .replace(/Ü/g, 'U')
+        .replace(/ş/g, 's')
+        .replace(/Ş/g, 'S')
+        .replace(/ç/g, 'c')
+        .replace(/Ç/g, 'C')
+        .replace(/ö/g, 'o')
+        .replace(/Ö/g, 'O');
+    }
+    
+    // Tablo sütun genişlikleri - sabit değişken olarak tanımla
+    const colWidths = [30, 60, 140, 60, 60, 60, 140, 140]; // Sütun genişlikleri
+    
+    // Sabit değerler - tüm sayfalarda tutarlılık için
+    const pageMargin = 50;
+    const tableLeft = pageMargin;
+    
+    // Sayfa üstbilgisi çizme fonksiyonu
+    function drawHeader(doc) {
+      // Üst bilgi arka planı
+      doc.rect(pageMargin, pageMargin, doc.page.width - 2 * pageMargin, 80)
+         .fill(colors.light);
+      
+      // Başlık alanı (tam genişlik)
+      doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
+         .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+           width: doc.page.width - 2 * pageMargin - 40,
+           align: 'center' 
+         });
+      
+      doc.fontSize(16).fillColor(colors.dark)
+         .text(turkishToAscii(organisation.tournamentName), pageMargin + 20, pageMargin + 40, { 
+           width: doc.page.width - 2 * pageMargin - 40,
+           align: 'center' 
+         });
+      
+      // Turnuva tarihleri
+      const startDate = moment(organisation.tournamentDate.startDate).format('DD.MM.YYYY');
+      const endDate = organisation.tournamentDate.endDate ? 
+        moment(organisation.tournamentDate.endDate).format('DD.MM.YYYY') : 
+        startDate;
+      
+      doc.fontSize(12).fillColor(colors.secondary)
+         .text(`${startDate} - ${endDate}`, pageMargin + 20, pageMargin + 60, { 
+           width: doc.page.width - 2 * pageMargin - 40,
+           align: 'center' 
+         });
+      
+      // Turnuva yeri
+      if (organisation.tournamentPlace && organisation.tournamentPlace.city) {
+        doc.fillColor(colors.dark)
+           .text(`${turkishToAscii(organisation.tournamentPlace.city.name)} - ${turkishToAscii(organisation.tournamentPlace.venue)}`, 
+                 pageMargin + 20, pageMargin + 75, { 
+                   width: doc.page.width - 2 * pageMargin - 40,
+                   align: 'center' 
+                 });
+      }
+      
+      // Sayfa başlığı
+      doc.rect(pageMargin, pageMargin + 90, doc.page.width - 2 * pageMargin, 30)
+         .fill(colors.primary);
+      
+      doc.font('Times-Bold').fontSize(14).fillColor(colors.white)
+         .text('DELEGATION CONTROL LIST', pageMargin + 10, pageMargin + 98, { 
+           width: doc.page.width - 2 * pageMargin - 20,
+           align: 'center' 
+         });
+      
+      return pageMargin + 130; // Başlıktan sonraki Y pozisyonunu döndür
+    }
+    
+    // Tablo başlıklarını çizme fonksiyonu - tekrar kullanılabilir
+    function drawTableHeaders(doc, tableTop) {
+      // Tablo başlık arka planı
+      doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 20)
+         .fill(colors.headerBg);
+      
+      doc.font('Times-Bold').fontSize(10).fillColor(colors.dark);
+      doc.text('#', tableLeft + 5, tableTop + 5);
+      doc.text('Kategori', tableLeft + colWidths[0] + 5, tableTop + 5); // Kategori sütunu
+      doc.text('Ad Soyad', tableLeft + colWidths[0] + colWidths[1] + 5, tableTop + 5); // Ad Soyad sütunu
+      doc.text('Cinsiyet', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + 5, tableTop + 5);
+      doc.text('Dogum Tarihi', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 5, tableTop + 5);
+      doc.text('Kemer', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 5, tableTop + 5);
+      doc.text('Kulup', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + 5, tableTop + 5);
+      doc.text('Antrenor', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + colWidths[6] + 5, tableTop + 5);
+      
+      // Tablo dış çerçevesi
+      doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 20)
+         .lineWidth(1)
+         .stroke(colors.tableBorder);
+      
+      // Sütun çizgileri
+      let x = tableLeft;
+      for (let i = 0; i < colWidths.length - 1; i++) {
+        x += colWidths[i];
+        doc.moveTo(x, tableTop)
+           .lineTo(x, tableTop + 20)
+           .lineWidth(0.5)
+           .stroke(colors.tableBorder);
+      }
+      
+      return tableTop + 20; // Başlıktan sonraki Y pozisyonunu döndür
+    }
+    
+    // İlk sayfa başlığını çiz
+    let contentY = drawHeader(doc);
+    
+    // İlk sayfa mı kontrolü
+    let isFirstPage = true;
+    
+    // Her şehir için tablo oluştur
+    Object.values(participantsByCity).forEach(city => {
+      // İlk sayfa değilse yeni sayfa ekle
+      if (!isFirstPage) {
+        doc.addPage({ 
+          size: 'A4',
+          layout: 'landscape',
+          margin: pageMargin
+        });
+        contentY = drawHeader(doc);
+      } else {
+        isFirstPage = false;
+      }
+      
+      // Şehir başlığı - her zaman sol hizalı
+      doc.rect(tableLeft, contentY, colWidths.reduce((a, b) => a + b, 0), 25)
+         .fill(colors.accent);
+      
+      doc.font('Times-Bold').fontSize(12).fillColor(colors.white);
+      doc.text(turkishToAscii(city.cityName), tableLeft + 10, contentY + 7, { 
+        align: 'left',
+        continued: false
+      });
+      
+      contentY += 25;
+      
+      // Tablo başlıklarını çiz
+      let rowY = drawTableHeaders(doc, contentY);
+      
+      // Tablo içeriği
+      doc.font('Times-Roman').fontSize(10);
+      
+      let currentWeight = null;
+      let participantsProcessed = 0;
+      let rowIsColored = false;
+      
+      // Her katılımcı için
+      city.participants.forEach((participant, index) => {
+        // Yeni sayfaya geçme kontrolü - sayfa sonuna yaklaşıldığında
+        if (rowY > doc.page.height - 100) {
+          // Yeni sayfa ekle ve yatay formatı koru
+          doc.addPage({ 
+            size: 'A4',
+            layout: 'landscape',
+            margin: pageMargin
+          });
+          
+          // Yeni sayfada üstbilgiyi çiz
+          contentY = drawHeader(doc);
+          
+          // Yeni sayfada şehir başlığını ve tablo başlıklarını tekrar ekle
+          doc.rect(tableLeft, contentY, colWidths.reduce((a, b) => a + b, 0), 25)
+             .fill(colors.accent);
+          
+          doc.font('Times-Bold').fontSize(12).fillColor(colors.white);
+          doc.text(turkishToAscii(city.cityName) + ' (devam)', tableLeft + 10, contentY + 7, { 
+            align: 'left',
+            continued: false
+          });
+          
+          contentY += 25;
+          
+          // Tablo başlıklarını yeniden çiz
+          rowY = drawTableHeaders(doc, contentY);
+          
+          // İçerik fontunu ayarla
+          doc.font('Times-Roman').fontSize(10);
+          rowIsColored = false;
+        }
+        
+        // Kilo değiştiğinde boşluk bırak ve arka plan rengini değiştir
+        if (currentWeight !== null && currentWeight !== participant.weight) {
+          rowY += 5;
+        }
+        currentWeight = participant.weight;
+        
+        // Alternatif satır renklendirme
+        if (rowIsColored) {
+          doc.rect(tableLeft, rowY, colWidths.reduce((a, b) => a + b, 0), 20)
+             .fill(colors.tableRowAlt);
+        }
+        rowIsColored = !rowIsColored;
+        
+        // Cinsiyet değerini Türkçe olarak ayarla
+        const genderText = participant.athlete.gender;
+        
+        // Satır içeriği
+        doc.fillColor(colors.dark);
+        doc.text((participantsProcessed + 1).toString(), tableLeft + 5, rowY + 5);
+        doc.text(
+          `${participant.weight} kg`, // Kategori (kilo) bilgisi
+          tableLeft + colWidths[0] + 5, 
+          rowY + 5
+        );
+        doc.text(
+          `${turkishToAscii(participant.athlete.name)} ${turkishToAscii(participant.athlete.surname)}`, 
+          tableLeft + colWidths[0] + colWidths[1] + 5, 
+          rowY + 5
+        );
+        doc.text(
+          turkishToAscii(genderText),
+          tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + 5, 
+          rowY + 5
+        );
+        doc.text(
+          moment(participant.athlete.birthDate).format('DD.MM.YYYY'), 
+          tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 5, 
+          rowY + 5
+        );
+        doc.text(
+          participant.athlete.belt ? turkishToAscii(participant.athlete.belt.name) : '-', 
+          tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 5, 
+          rowY + 5
+        );
+        doc.text(
+          participant.athlete.clubName ? turkishToAscii(participant.athlete.clubName) : '-',
+          tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + 5, 
+          rowY + 5
+        );
+        doc.text(
+          participant.coach ? `${turkishToAscii(participant.coach.name)} ${turkishToAscii(participant.coach.surname)}` : '-', 
+          tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + colWidths[6] + 5, 
+          rowY + 5
+        );
+        
+        // Satır çizgisi
+        doc.rect(tableLeft, rowY, colWidths.reduce((a, b) => a + b, 0), 20)
+           .lineWidth(0.5)
+           .stroke(colors.tableBorder);
+        
+        // Sütun çizgileri
+        let x = tableLeft;
+        for (let i = 0; i < colWidths.length - 1; i++) {
+          x += colWidths[i];
+          doc.moveTo(x, rowY)
+             .lineTo(x, rowY + 20)
+             .lineWidth(0.5)
+             .stroke(colors.tableBorder);
+        }
+        
+        rowY += 20;
+        participantsProcessed++;
+      });
+      
+      // Şehir tablosunun altında boşluk bırak
+      doc.moveDown(2);
+    });
+    
+    // Sayfa altbilgisi
+    doc.fontSize(8).fillColor(colors.secondary)
+       .text(`Olusturulma Tarihi: ${moment().format('DD.MM.YYYY HH:mm')}`, 
+             pageMargin, 
+             doc.page.height - pageMargin - 10, 
+             { align: 'center' });
+    
+    // PDF'i sonlandır
+    doc.end();
+    
+  } catch (error) {
+    console.error("PDF oluşturma hatası:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Organizasyon tartı listesi PDF çıktısını al
+router.get("/:id/weighing-list", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { cityId, weight, coordinator, chairman } = req.query;
+    
+    if (!cityId || !weight) {
+      return res.status(400).json({ message: "Şehir ID ve kilo bilgisi gereklidir" });
+    }
+    
+    // Organizasyonu bul ve katılımcıları populate et
+    const organisation = await Organisation.findById(id)
+      .populate({
+        path: "participants.athlete",
+        select: "name surname birthDate gender belt weight club city",
+        populate: [
+          { path: "belt", select: "name value" },
+          { path: "club", select: "name" },
+          { path: "city", select: "name" }
+        ]
+      })
+      .populate({
+        path: "participants.coach",
+        select: "name surname"
+      })
+      .populate({
+        path: "tournamentPlace.city",
+        select: "name"
+      });
+    
+    if (!organisation) {
+      return res.status(404).json({ message: "Organizasyon bulunamadı" });
+    }
+    
+    // Tüm katılımcıları al (rol filtrelemesi olmadan)
+    let participants = [...organisation.participants];
+    
+    // Eksik kulüp bilgilerini tamamla
+    const Club = mongoose.model('Club'); // Kulüp modelini al
+    const City = mongoose.model('City'); // Şehir modelini al
+    
+    // Tüm kulüpleri bir kerede getir
+    const clubIds = participants
+      .filter(p => p.athlete && p.athlete.club && typeof p.athlete.club === 'string')
+      .map(p => p.athlete.club);
+    
+    let clubs = {};
+    if (clubIds.length > 0) {
+      const clubsData = await Club.find({ _id: { $in: clubIds } }).select('name');
+      clubsData.forEach(club => {
+        clubs[club._id.toString()] = club.name;
+      });
+    }
+    
+    // Şehir bilgisini al
+    const city = await City.findById(cityId).select('name');
+    if (!city) {
+      return res.status(404).json({ message: "Şehir bulunamadı" });
+    }
+    
+    // Belirtilen şehir ve kiloya göre katılımcıları filtrele
+    const filteredParticipants = participants.filter(p => 
+      p.athlete && 
+      p.athlete.city && 
+      p.athlete.city._id.toString() === cityId &&
+      p.weight.toString() === weight.toString()
+    );
+    
+    // Kulüp bilgilerini ekle
+    filteredParticipants.forEach(participant => {
+      if (participant.athlete.club) {
+        if (typeof participant.athlete.club === 'string') {
+          const clubId = participant.athlete.club;
+          if (clubs[clubId]) {
+            participant.athlete.clubName = clubs[clubId];
+          }
+        } else if (participant.athlete.club.name) {
+          participant.athlete.clubName = participant.athlete.club.name;
+        }
+      }
+    });
+    
+    // Renk tanımlamaları
+    const colors = {
+      primary: '#1e3a8a',      // Koyu mavi
+      secondary: '#3b82f6',    // Açık mavi
+      accent: '#f59e0b',       // Turuncu
+      light: '#f3f4f6',        // Açık gri
+      dark: '#1f2937',         // Koyu gri
+      white: '#ffffff',        // Beyaz
+      headerBg: '#e5e7eb',     // Başlık arkaplanı
+      tableBorder: '#d1d5db',  // Tablo çizgileri
+      tableRowAlt: '#f9fafb'   // Alternatif satır rengi
+    };
+    
+    // PDF oluştur - Yatay (Landscape) format
+    const doc = new PDFDocument({ 
+      size: 'A4',
+      layout: 'landscape', // Yatay format
+      margin: 50,
+      info: {
+        Title: 'Tartı Listesi',
+        Author: 'Türkiye Kuraş Federasyonu',
+        Subject: organisation.tournamentName
+      }
+    });
+    
+    // PDF başlığını ayarla
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=weighing-list-${cityId}-${weight}.pdf`);
+    
+    // PDF'i response'a pipe et
+    doc.pipe(res);
+    
+    // Türkçe karakterleri ASCII karşılıklarıyla değiştiren yardımcı fonksiyon
+    function turkishToAscii(text) {
+      if (!text) return ''; // text undefined veya null ise boş string döndür
+      
+      return text
+        .replace(/ı/g, 'i')
+        .replace(/İ/g, 'I')
+        .replace(/ğ/g, 'g')
+        .replace(/Ğ/g, 'G')
+        .replace(/ü/g, 'u')
+        .replace(/Ü/g, 'U')
+        .replace(/ş/g, 's')
+        .replace(/Ş/g, 'S')
+        .replace(/ç/g, 'c')
+        .replace(/Ç/g, 'C')
+        .replace(/ö/g, 'o')
+        .replace(/Ö/g, 'O');
+    }
+    
+    // Sabit değerler
+    const pageMargin = 50;
+    const tableLeft = pageMargin;
+    const tableWidth = doc.page.width - 2 * pageMargin;
+    const colWidths = [
+      Math.round(tableWidth * 0.05),  // # (5%)
+      Math.round(tableWidth * 0.35),  // Ad Soyad (35%)
+      Math.round(tableWidth * 0.25),  // Kulüp (25%)
+      Math.round(tableWidth * 0.175), // Tartı (17.5%)
+      Math.round(tableWidth * 0.175)  // İmza (17.5%)
+    ];
+    
+    // Başlık çiz
+    doc.rect(pageMargin, pageMargin, doc.page.width - 2 * pageMargin, 80)
+       .fill(colors.light);
+    
+    doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
+       .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+         width: doc.page.width - 2 * pageMargin - 40,
+         align: 'center' 
+       });
+    
+    doc.fontSize(16).fillColor(colors.dark)
+       .text(turkishToAscii(organisation.tournamentName), pageMargin + 20, pageMargin + 40, { 
+         width: doc.page.width - 2 * pageMargin - 40,
+         align: 'center' 
+       });
+    
+    // Turnuva tarihleri
+    const startDate = moment(organisation.tournamentDate.startDate).format('DD.MM.YYYY');
+    const endDate = organisation.tournamentDate.endDate ? 
+      moment(organisation.tournamentDate.endDate).format('DD.MM.YYYY') : 
+      startDate;
+    
+    doc.fontSize(12).fillColor(colors.secondary)
+       .text(`${startDate} - ${endDate}`, pageMargin + 20, pageMargin + 60, { 
+         width: doc.page.width - 2 * pageMargin - 40,
+         align: 'center' 
+       });
+    
+    // Tartı listesi başlığı
+    doc.rect(pageMargin, pageMargin + 90, doc.page.width - 2 * pageMargin, 30)
+       .fill(colors.primary);
+    
+    doc.font('Times-Bold').fontSize(14).fillColor(colors.white)
+       .text('TARTI LISTESI', pageMargin + 10, pageMargin + 98, { 
+         width: doc.page.width - 2 * pageMargin - 20,
+         align: 'center' 
+       });
+    
+    // Şehir ve kilo bilgisi
+    doc.font('Times-Bold').fontSize(12).fillColor(colors.dark)
+       .text(`${turkishToAscii(city.name)} - ${weight} kg`, pageMargin, pageMargin + 140, { 
+         width: doc.page.width - 2 * pageMargin,
+         align: 'center' 
+       });
+    
+    // Tablo başlıkları
+    let tableTop = pageMargin + 170;
+    
+    doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 25)
+       .fill(colors.headerBg);
+    
+    doc.font('Times-Bold').fontSize(10).fillColor(colors.dark);
+    doc.text('#', tableLeft + 10, tableTop + 8);
+    doc.text('Ad Soyad', tableLeft + colWidths[0] + 10, tableTop + 8);
+    doc.text('Kulüp', tableLeft + colWidths[0] + colWidths[1] + 10, tableTop + 8);
+    doc.text('Tarti', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + 10, tableTop + 8);
+    doc.text('Imza', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 10, tableTop + 8);
+    
+    // Tablo dış çerçevesi
+    doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 25)
+       .lineWidth(1)
+       .stroke(colors.tableBorder);
+    
+    // Tablo içeriği
+    let rowY = tableTop + 25;
+    let rowIsColored = false;
+    
+    // Her katılımcı için
+    filteredParticipants.forEach((participant, index) => {
+      // Alternatif satır renklendirme
+      if (rowIsColored) {
+        doc.rect(tableLeft, rowY, colWidths.reduce((a, b) => a + b, 0), 30)
+           .fill(colors.tableRowAlt);
+      }
+      rowIsColored = !rowIsColored;
+      
+      // Satır içeriği
+      doc.font('Times-Roman').fontSize(10).fillColor(colors.dark);
+      doc.text((index + 1).toString(), tableLeft + 10, rowY + 10);
+      doc.text(
+        `${turkishToAscii(participant.athlete.name)} ${turkishToAscii(participant.athlete.surname)}`, 
+        tableLeft + colWidths[0] + 10, 
+        rowY + 10
+      );
+      doc.text(
+        participant.athlete.clubName ? turkishToAscii(participant.athlete.clubName) : '-',
+        tableLeft + colWidths[0] + colWidths[1] + 10, 
+        rowY + 10
+      );
+      
+      // Tartı ve İmza alanları boş bırakılır
+      
+      // Satır çizgisi
+      doc.rect(tableLeft, rowY, colWidths.reduce((a, b) => a + b, 0), 30)
+         .lineWidth(0.5)
+         .stroke(colors.tableBorder);
+      
+      // Sütun çizgileri
+      let x = tableLeft;
+      for (let i = 0; i < colWidths.length - 1; i++) {
+        x += colWidths[i];
+        doc.moveTo(x, rowY)
+           .lineTo(x, rowY + 30)
+           .lineWidth(0.5)
+           .stroke(colors.tableBorder);
+      }
+      
+      rowY += 30;
+    });
+    
+    // İmza alanları
+    doc.moveDown(4);
+    let signatureY = rowY + 50;
+    
+    // İmza çizgileri
+    const signatureWidth = 200;
+    const signatureGap = (doc.page.width - 2 * pageMargin - 2 * signatureWidth) / 3;
+    
+    // Sol imza (Koordinatör)
+    doc.font('Times-Bold').fontSize(10).fillColor(colors.dark);
+    doc.text('Koordinatör', 
+             pageMargin + signatureGap, 
+             signatureY, 
+             { width: signatureWidth, align: 'center' });
+    
+    doc.moveTo(pageMargin + signatureGap, signatureY + 30)
+       .lineTo(pageMargin + signatureGap + signatureWidth, signatureY + 30)
+       .lineWidth(0.5)
+       .stroke(colors.dark);
+    
+    doc.text(coordinator || '', 
+             pageMargin + signatureGap, 
+             signatureY + 40, 
+             { width: signatureWidth, align: 'center' });
+    
+    // Sağ imza (Kurul Başkanı)
+    doc.text('Kurul Baskani', 
+             pageMargin + 2 * signatureGap + signatureWidth, 
+             signatureY, 
+             { width: signatureWidth, align: 'center' });
+    
+    doc.moveTo(pageMargin + 2 * signatureGap + signatureWidth, signatureY + 30)
+       .lineTo(pageMargin + 2 * signatureGap + 2 * signatureWidth, signatureY + 30)
+       .lineWidth(0.5)
+       .stroke(colors.dark);
+    
+    doc.text(chairman || '', 
+             pageMargin + 2 * signatureGap + signatureWidth, 
+             signatureY + 40, 
+             { width: signatureWidth, align: 'center' });
+    
+    // Sayfa altbilgisi
+    doc.fontSize(8).fillColor(colors.secondary)
+       .text(`Olusturulma Tarihi: ${moment().format('DD.MM.YYYY HH:mm')}`, 
+             pageMargin, 
+             doc.page.height - pageMargin - 10, 
+             { align: 'center' });
+    
+    // PDF'i sonlandır
+    doc.end();
+    
+  } catch (error) {
+    console.error("Tartı listesi oluşturma hatası:", error);
     res.status(500).json({ message: error.message });
   }
 });

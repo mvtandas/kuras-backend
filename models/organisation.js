@@ -18,11 +18,10 @@ const OrganisationSchema = new mongoose.Schema({
     maxDate: { type: Date }  // Maksimum Doğum Tarihi
   },
   beltRequirement: { type: mongoose.Schema.Types.ObjectId, ref: "Belt" }, // İzin Verilen Kemer
-  participationType: { 
-    type: String, 
-    enum: ['Sporcu Erkek', 'Sporcu Kadın', 'Hakem'], 
-    required: true 
-  }, // Katılım Tipi
+  
+  // Ağırlık Gereksinimleri
+  weightsRequirementsMens: [{ type: String }], // Erkekler için ağırlık kategorileri (string olarak değiştirildi)
+  weightsRequirementsWomens: [{ type: String }], // Kadınlar için ağırlık kategorileri (string olarak değiştirildi)
   
   // Katılımcılar (Detaylı Bilgilerle)
   participants: [{

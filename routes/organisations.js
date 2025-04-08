@@ -588,6 +588,7 @@ router.put("/:id/participants/:athleteId", auth, async (req, res) => {
 router.get("/:id/participants/export", auth, async (req, res) => {
   try {
     const { id } = req.params;
+    const { city } = req.query; // Şehir parametresini al
     const user = await User.findById(req.user.id).populate("role");
     
     // Organizasyonu bul ve katılımcıları populate et
@@ -629,7 +630,16 @@ router.get("/:id/participants/export", auth, async (req, res) => {
         (p.coach && p.coach._id.toString() === user.id.toString())
       );
     }
-    
+
+    // Şehir filtresi ekle
+    if (city) {
+      participants = participants.filter(p => 
+        p.athlete && 
+        p.athlete.city && 
+        p.athlete.city._id.toString() === city
+      );
+    }
+
     // Eksik kulüp bilgilerini tamamla
     const Club = mongoose.model('Club'); // Kulüp modelini al
     
@@ -1211,9 +1221,74 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
     // Tablo içeriği
     let rowY = tableTop + 25;
     let rowIsColored = false;
+    let currentPage = 1;
     
     // Her katılımcı için
     filteredParticipants.forEach((participant, index) => {
+      // Sayfa sonu kontrolü - yeni sayfa gerekiyorsa
+      if (rowY > doc.page.height - 100) {
+        // Yeni sayfa ekle
+        doc.addPage({ 
+          size: 'A4',
+          layout: 'landscape',
+          margin: pageMargin
+        });
+        
+        // Yeni sayfada üstbilgiyi çiz
+        doc.rect(pageMargin, pageMargin, doc.page.width - 2 * pageMargin, 80)
+           .fill(colors.light);
+        
+        doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
+           .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+             width: doc.page.width - 2 * pageMargin - 40,
+             align: 'center' 
+           });
+        
+        doc.fontSize(16).fillColor(colors.dark)
+           .text(turkishToAscii(organisation.tournamentName), pageMargin + 20, pageMargin + 40, { 
+             width: doc.page.width - 2 * pageMargin - 40,
+             align: 'center' 
+           });
+        
+        // Kilo bilgisi
+        doc.font('Times-Bold').fontSize(12).fillColor(colors.dark)
+           .text(`${weight} kg (devam)`, pageMargin, pageMargin + 100, { 
+             width: doc.page.width - 2 * pageMargin,
+             align: 'center' 
+           });
+        
+        // Tablo başlıklarını yeniden çiz
+        tableTop = pageMargin + 130;
+        doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 25)
+           .fill(colors.headerBg);
+        
+        doc.font('Times-Bold').fontSize(10).fillColor(colors.dark);
+        doc.text('#', tableLeft + 10, tableTop + 8);
+        doc.text('Ad Soyad', tableLeft + colWidths[0] + 10, tableTop + 8);
+        doc.text('Kulup', tableLeft + colWidths[0] + colWidths[1] + 10, tableTop + 8);
+        doc.text('Tarti', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + 10, tableTop + 8);
+        doc.text('Imza', tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 10, tableTop + 8);
+        
+        // Tablo çerçevesi ve çizgileri
+        doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 25)
+           .lineWidth(1)
+           .stroke(colors.tableBorder);
+        
+        let x = tableLeft;
+        for (let i = 0; i < colWidths.length - 1; i++) {
+          x += colWidths[i];
+          doc.moveTo(x, tableTop)
+             .lineTo(x, tableTop + 25)
+             .lineWidth(0.5)
+             .stroke(colors.tableBorder);
+        }
+        
+        // Yeni sayfada başlangıç pozisyonunu ayarla
+        rowY = tableTop + 25;
+        rowIsColored = false;
+        currentPage++;
+      }
+      
       // Alternatif satır renklendirme
       if (rowIsColored) {
         doc.rect(tableLeft, rowY, colWidths.reduce((a, b) => a + b, 0), 30)
@@ -1255,8 +1330,17 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
       rowY += 30;
     });
     
+    // İmza alanları sadece son sayfada olmalı
+    if (rowY > doc.page.height - 200) {
+      doc.addPage({ 
+        size: 'A4',
+        layout: 'landscape',
+        margin: pageMargin
+      });
+      rowY = pageMargin + 50;
+    }
+    
     // İmza alanları
-    doc.moveDown(4);
     let signatureY = rowY + 50;
     
     // İmza çizgileri

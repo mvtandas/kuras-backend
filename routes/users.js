@@ -1367,4 +1367,40 @@ router.put("/change-role/:userId", auth, async (req, res) => {
   }
 });
 
+// Kullanıcı şifresini değiştir (SADECE ADMIN)
+router.put("/change-password/:userId", auth, async (req, res) => {
+  try {
+    // Admin kontrolü
+    const adminUser = await User.findById(req.user.id).populate("role");
+    if (adminUser.role.name !== "Admin") {
+      return res.status(403).json({ message: "Bu işlem için yetkiniz yok" });
+    }
+
+    const { userId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({ message: "Yeni şifre gereklidir" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    // Yeni şifreyi hashle
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+
+    await user.save();
+    
+    res.status(200).json({
+      message: "Kullanıcı şifresi başarıyla değiştirildi"
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 module.exports = router;

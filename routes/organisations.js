@@ -414,11 +414,12 @@ router.get("/:id/participants", auth, async (req, res) => {
     // Kullanıcı rolüne göre katılımcıları filtrele
     let participants = [...organisation.participants];
     
-    // Antrenör ise, sadece kendi eklediği veya sorumlusu olduğu katılımcıları göster
-    if (user.role.name === "Coach") {
+    // Antrenör veya Temsilci ise, sadece kendi ilindeki katılımcıları göster
+    if (user.role.name === "Coach" || user.role.name === "Representetive") {
       participants = participants.filter(p => 
-        p.addedBy._id.toString() === user.id.toString() || 
-        (p.coach && p.coach._id.toString() === user.id.toString())
+        p.athlete && 
+        p.athlete.city && 
+        p.athlete.city._id.toString() === user.city.toString()
       );
     }
     
@@ -623,11 +624,12 @@ router.get("/:id/participants/export", auth, async (req, res) => {
     // Kullanıcı rolüne göre katılımcıları filtrele
     let participants = [...organisation.participants];
     
-    // Antrenör ise, sadece kendi eklediği veya sorumlusu olduğu katılımcıları göster
-    if (user.role.name === "Coach") {
+    // Antrenör veya Temsilci ise, sadece kendi ilindeki katılımcıları göster
+    if (user.role.name === "Coach" || user.role.name === "Representetive") {
       participants = participants.filter(p => 
-        p.addedBy._id.toString() === user.id.toString() || 
-        (p.coach && p.coach._id.toString() === user.id.toString())
+        p.athlete && 
+        p.athlete.city && 
+        p.athlete.city._id.toString() === user.city.toString()
       );
     }
 

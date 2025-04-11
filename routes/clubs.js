@@ -29,11 +29,54 @@ router.post("/", async (req, res) => {
 });
 
 // Tüm kulüpleri getir
-router.get("/", async (req, res) => {
+router.get("/", auth, async (req, res) => {
   try {
-    const clubs = await Club.find().populate('city').sort({ name: 1 });
+    let query = {};
+
+    // Eğer kullanıcı Coach ise, sadece kendi şehrindeki kulüpleri göster
+    if (req.user.role.name === "Coach") {
+      console.log("Coach bilgileri:", {
+        id: req.user._id,
+        name: req.user.name,
+        role: req.user.role.name,
+        city: req.user.city
+      });
+
+      if (!req.user.city) {
+        return res.status(400).json({ 
+          message: "Coach'un şehir bilgisi eksik" 
+        });
+      }
+
+      // Şehir ID'sini kontrol et
+      const cityId = req.user.city._id || req.user.city;
+      if (!cityId) {
+        return res.status(400).json({ 
+          message: "Coach'un şehir ID'si geçersiz" 
+        });
+      }
+
+      query.city = cityId;
+    }
+
+    console.log("Oluşturulan sorgu:", JSON.stringify(query, null, 2));
+    
+    const clubs = await Club.find(query)
+      .populate('city')
+      .sort({ name: 1 });
+
+    console.log("Bulunan kulüp sayısı:", clubs.length);
+    if (clubs.length > 0) {
+      console.log("İlk kulüp örneği:", {
+        id: clubs[0]._id,
+        name: clubs[0].name,
+        city: clubs[0].city
+      });
+    }
+
     res.status(200).json(clubs);
   } catch (err) {
+    console.error("Hata detayı:", err);
     res.status(500).json({ message: err.message });
   }
 });

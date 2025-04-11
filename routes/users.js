@@ -245,9 +245,12 @@ router.post("/delete-athlete/:id", async (req, res) => {
   }
 });
 
-router.get("/get-athletes", async (req, res) => {
+router.get("/get-athletes", auth, async (req, res) => {
   try {
     const role = await Role.findOne({ name: "Athlete" });
+    if (!role) {
+      return res.status(404).json({ message: "Sporcu rolü bulunamadı" });
+    }
     
     // Query parametrelerinden minBeltValue, minDate ve maxDate değerlerini al
     const { minBeltValue, minDate, maxDate } = req.query;
@@ -255,42 +258,158 @@ router.get("/get-athletes", async (req, res) => {
     // Temel sorgu
     let query = { role: role._id };
     
+    // Eğer kullanıcı Athlete ise, sadece kendisini göster
+    if (req.user.role.name === "Athlete") {
+      console.log("Sporcu bilgileri:", {
+        id: req.user._id,
+        name: req.user.name,
+        role: req.user.role.name
+      });
+
+      query._id = req.user._id;
+    }
+    // Eğer kullanıcı Coach ise, sadece kendi şehir ve kulübündeki sporcuları göster
+    else if (req.user.role.name === "Coach") {
+      console.log("Coach bilgileri:", {
+        id: req.user._id,
+        name: req.user.name,
+        role: req.user.role.name,
+        city: req.user.city,
+        club: req.user.club
+      });
+
+      if (!req.user.city || !req.user.club) {
+        return res.status(400).json({ 
+          message: "Coach'un şehir veya kulüp bilgisi eksik" 
+        });
+      }
+
+      // Şehir ve kulüp ID'lerini kontrol et
+      const cityId = req.user.city._id || req.user.city;
+      const clubId = req.user.club._id || req.user.club;
+
+      if (!cityId || !clubId) {
+        return res.status(400).json({ 
+          message: "Coach'un şehir veya kulüp ID'si geçersiz" 
+        });
+      }
+
+      query.city = cityId;
+      query.club = clubId;
+    }
+    // Eğer kullanıcı Referee ise, sadece kendi şehrindeki sporcuları göster
+    else if (req.user.role.name === "Referee") {
+      console.log("Hakem bilgileri:", {
+        id: req.user._id,
+        name: req.user.name,
+        role: req.user.role.name,
+        city: req.user.city
+      });
+
+      if (!req.user.city) {
+        return res.status(400).json({ 
+          message: "Hakemin şehir bilgisi eksik" 
+        });
+      }
+
+      // Şehir ID'sini kontrol et
+      const cityId = req.user.city._id || req.user.city;
+      if (!cityId) {
+        return res.status(400).json({ 
+          message: "Hakemin şehir ID'si geçersiz" 
+        });
+      }
+
+      query.city = cityId;
+    }
+    // Eğer kullanıcı Representetive ise, sadece kendi şehrindeki sporcuları göster
+    else if (req.user.role.name === "Representetive") {
+      console.log("Temsilci bilgileri:", {
+        id: req.user._id,
+        name: req.user.name,
+        role: req.user.role.name,
+        city: req.user.city
+      });
+
+      if (!req.user.city) {
+        return res.status(400).json({ 
+          message: "Temsilcinin şehir bilgisi eksik" 
+        });
+      }
+
+      // Şehir ID'sini kontrol et
+      const cityId = req.user.city._id || req.user.city;
+      if (!cityId) {
+        return res.status(400).json({ 
+          message: "Temsilcinin şehir ID'si geçersiz" 
+        });
+      }
+
+      query.city = cityId;
+    }
+    
     // Eğer minBeltValue belirtilmişse, kemer değeri filtresini ekle
     if (minBeltValue && !isNaN(Number(minBeltValue))) {
-      // Önce tüm kemerleri getir
       const belts = await Belt.find({ value: { $gte: Number(minBeltValue) } });
       const beltIds = belts.map(belt => belt._id);
-      
-      // Sorguya kemer filtresi ekle
       query.belt = { $in: beltIds };
     }
     
     // Doğum tarihi filtresini ekle
     if (minDate || maxDate) {
       query.birthDate = {};
-      
       if (minDate) {
-        query.birthDate.$gte = new Date(minDate); // Minimum tarihten sonra doğanlar (daha genç)
+        query.birthDate.$gte = new Date(minDate);
       }
-      
       if (maxDate) {
-        query.birthDate.$lte = new Date(maxDate); // Maksimum tarihten önce doğanlar (daha yaşlı)
+        query.birthDate.$lte = new Date(maxDate);
       }
     }
     
+    console.log("Oluşturulan sorgu:", JSON.stringify(query, null, 2));
+    
+    // Önce sorguyu test et
+    const testQuery = await User.find(query).countDocuments();
+    console.log("Sorgu sonucu bulunan toplam kayıt sayısı:", testQuery);
+    
     const athletes = await User.find(query)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate({
+        path: 'role',
+        select: 'name'
+      })
+      .populate({
+        path: 'city',
+        select: 'name _id'
+      })
+      .populate({
+        path: 'club',
+        select: 'name _id'
+      })
+      .populate({
+        path: 'belt',
+        select: 'name value _id'
+      });
+
+    console.log("Bulunan sporcu sayısı:", athletes.length);
+    if (athletes.length > 0) {
+      console.log("İlk sporcu örneği:", {
+        id: athletes[0]._id,
+        name: athletes[0].name,
+        city: athletes[0].city,
+        club: athletes[0].club
+      });
+    }
 
     res.status(200).json(athletes);
   } catch (error) {
-    console.error(error);
+    console.error("Hata detayı:", error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
 });
 
-router.get("/get-athlete/:id", async (req, res) => {
-   try {
+router.get("/get-athlete/:id", auth, async (req, res) => {
+  try {
     const athlete = await User.findById(req.params.id)
       .select("-password")
       .populate(["role", "city", "club", "belt"]);
@@ -299,14 +418,17 @@ router.get("/get-athlete/:id", async (req, res) => {
       return res.status(404).json({ message: "Sporcu bulunamadı" });
     }
 
+    // Eğer kullanıcı Coach ise ve sporcu farklı bir şehirdeyse erişimi engelle
+    if (req.user.role.name === "Coach" && athlete.city._id.toString() !== req.user.city._id.toString()) {
+      return res.status(403).json({ message: "Bu sporcuya erişim yetkiniz yok" });
+    }
+
     res.status(200).json(athlete);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
 });
-
-
 
 router.post("/create-coach", async (req, res) => {
   const {
@@ -509,21 +631,50 @@ router.post("/delete-coach/:id", async (req, res) => {
   }
 });
 
-router.get("/get-coaches", async (req, res) => {
+router.get("/get-coaches", auth, async (req, res) => {
   try {
     const role = await Role.findOne({ name: "Coach" });
-    const coaches = await User.find({ role: role._id })
+    let query = { role: role._id };
+
+    // Eğer kullanıcı Coach, Referee veya Representetive ise, sadece kendi şehrindeki antrenörleri göster
+    if (req.user.role.name === "Coach" || req.user.role.name === "Referee" || req.user.role.name === "Representetive") {
+      console.log("Kullanıcı bilgileri:", {
+        id: req.user._id,
+        name: req.user.name,
+        role: req.user.role.name,
+        city: req.user.city
+      });
+
+      if (!req.user.city) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi eksik" 
+        });
+      }
+
+      // Şehir ID'sini kontrol et
+      const cityId = req.user.city._id || req.user.city;
+      if (!cityId) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir ID'si geçersiz" 
+        });
+      }
+
+      query.city = cityId;
+    }
+
+    console.log("Sorgu:", query);
+    const coaches = await User.find(query)
       .select("-password")
       .populate(["role", "city", "club", "belt"]);
 
     res.status(200).json(coaches);
   } catch (error) {
-    console.error(error);
+    console.error("Hata:", error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
 });
 
-router.get("/get-coach/:id", async (req, res) => {
+router.get("/get-coach/:id", auth, async (req, res) => {
   try {
     const coach = await User.findById(req.params.id)
       .select("-password")
@@ -531,6 +682,11 @@ router.get("/get-coach/:id", async (req, res) => {
 
     if (!coach) {
       return res.status(404).json({ message: "Antrenör bulunamadı" });
+    }
+
+    // Eğer kullanıcı Coach ise ve antrenör farklı bir şehirdeyse erişimi engelle
+    if (req.user.role.name === "Coach" && coach.city._id.toString() !== req.user.city._id.toString()) {
+      return res.status(403).json({ message: "Bu antrenöre erişim yetkiniz yok" });
     }
 
     res.status(200).json(coach);
@@ -781,37 +937,50 @@ router.post("/delete-referee/:id", async (req, res) => {
 }
 );
 
-router.get("/get-referees", async (req, res) => {
+router.get("/get-referees", auth, async (req, res) => {
   try {
     const role = await Role.findOne({ name: "Referee" });
-    const referees = await User.find({ role: role._id })
+    let query = { role: role._id };
+
+    // Eğer kullanıcı Coach ise, sadece kendi şehrindeki hakemleri göster
+    if (req.user.role.name === "Coach" || req.user.role.name === "Representetive") {
+      console.log("Coach şehri:", req.user.city._id);
+      query.city = req.user.city._id;
+    }
+
+    console.log("Sorgu:", query);
+    const referees = await User.find(query)
       .select("-password")
       .populate(["role", "city", "belt"]);
 
     res.status(200).json(referees);
   } catch (error) {
-    console.error(error);
+    console.error("Hata:", error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
 });
 
-router.get("/get-referee/:id", async (req, res) => {
-    try {
-      const referee = await User.findById(req.params.id)
-        .select("-password")
-        .populate(["role", "city", "club", "belt"]);
-  
-      if (!referee) {
-        return res.status(404).json({ message: "Hakem bulunamadı" });
-      }
-  
-      res.status(200).json(referee);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Sunucu hatası" });
+router.get("/get-referee/:id", auth, async (req, res) => {
+  try {
+    const referee = await User.findById(req.params.id)
+      .select("-password")
+      .populate(["role", "city", "club", "belt"]);
+
+    if (!referee) {
+      return res.status(404).json({ message: "Hakem bulunamadı" });
     }
+
+    // Eğer kullanıcı Coach ise ve hakem farklı bir şehirdeyse erişimi engelle
+    if (req.user.role.name === "Coach" && referee.city._id.toString() !== req.user.city._id.toString()) {
+      return res.status(403).json({ message: "Bu hakeme erişim yetkiniz yok" });
+    }
+
+    res.status(200).json(referee);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
   }
-  );
+});
 
 router.post("/create-representetive", async (req, res) => {
   const {
@@ -1002,22 +1171,30 @@ router.post("/delete-representetive/:id", async (req, res) => {
 }
 );
 
-router.get("/get-representetives", async (req, res) => {
+router.get("/get-representetives", auth, async (req, res) => {
   try {
     const role = await Role.findOne({ name: "Representetive" });
-    const representetives = await User.find({ role: role._id })
+    let query = { role: role._id };
+
+    // Eğer kullanıcı Coach ise, sadece kendi şehrindeki temsilcileri göster
+    if (req.user.role.name === "Coach") {
+      console.log("Coach şehri:", req.user.city._id);
+      query.city = req.user.city._id;
+    }
+
+    console.log("Sorgu:", query);
+    const representetives = await User.find(query)
       .select("-password")
       .populate(["role", "city", "belt"]);
 
     res.status(200).json(representetives);
   } catch (error) {
-    console.error(error);
+    console.error("Hata:", error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
-}
-);
+});
 
-router.get("/get-representetive/:id", async (req, res) => {
+router.get("/get-representetive/:id", auth, async (req, res) => {
   try {
     const representetive = await User.findById(req.params.id)
       .select("-password")
@@ -1027,14 +1204,17 @@ router.get("/get-representetive/:id", async (req, res) => {
       return res.status(404).json({ message: "Temsilci bulunamadı" });
     }
 
+    // Eğer kullanıcı Coach ise ve temsilci farklı bir şehirdeyse erişimi engelle
+    if (req.user.role.name === "Coach" && representetive.city._id.toString() !== req.user.city._id.toString()) {
+      return res.status(403).json({ message: "Bu temsilciye erişim yetkiniz yok" });
+    }
+
     res.status(200).json(representetive);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
-}
-);
-
+});
 
 router.post("/create-personel", async (req, res) => {
   const {
@@ -1189,21 +1369,29 @@ router.post("/delete-personel/:id", async (req, res) => {
 }
 );
 
-router.get("/get-personels", async (req, res) => {
+router.get("/get-personels", auth, async (req, res) => {
   try {
-    const personels = await User.find({ role: "Personel" })
+    let query = { role: "Personel" };
+
+    // Eğer kullanıcı Coach ise, sadece kendi şehrindeki personelleri göster
+    if (req.user.role.name === "Coach") {
+      console.log("Coach şehri:", req.user.city._id);
+      query.city = req.user.city._id;
+    }
+
+    console.log("Sorgu:", query);
+    const personels = await User.find(query)
       .select("-password")
       .populate(["role", "city", "club", "belt"]);
 
     res.status(200).json(personels);
   } catch (error) {
-    console.error(error);
+    console.error("Hata:", error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
-}
-);
+});
 
-router.get("/get-personel/:id", async (req, res) => {
+router.get("/get-personel/:id", auth, async (req, res) => {
   try {
     const personel = await User.findById(req.params.id)
       .select("-password")
@@ -1213,15 +1401,17 @@ router.get("/get-personel/:id", async (req, res) => {
       return res.status(404).json({ message: "Personel bulunamadı" });
     }
 
+    // Eğer kullanıcı Coach ise ve personel farklı bir şehirdeyse erişimi engelle
+    if (req.user.role.name === "Coach" && personel.city._id.toString() !== req.user.city._id.toString()) {
+      return res.status(403).json({ message: "Bu personele erişim yetkiniz yok" });
+    }
+
     res.status(200).json(personel);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
-}
-);
-
-
+});
 
 // Login a user
 router.post("/login", async (req, res) => {
@@ -1305,7 +1495,6 @@ router.get("/", auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
 
 // Kullanıcı rolünü değiştir (SADECE ADMIN)
 router.put("/change-role/:userId", auth, async (req, res) => {

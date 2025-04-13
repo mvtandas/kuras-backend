@@ -34,7 +34,7 @@ router.get("/", auth, async (req, res) => {
     let query = {};
 
     // Eğer kullanıcı Coach ise, sadece kendi şehrindeki kulüpleri göster
-    if (req.user.role.name === "Coach") {
+    if (req.user.role.name === "Coach" || req.user.role.name === "Representetive") {
       console.log("Coach bilgileri:", {
         id: req.user._id,
         name: req.user.name,
@@ -124,7 +124,7 @@ router.put("/:id", auth, async (req, res) => {
 // Kulüp sil (sadece admin)
 router.delete("/:id", auth, async (req, res) => {
   try {
-    if (req.user.role !== "Admin") {
+    if (req.user.role.name !== "Admin") {
       return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
     }
 

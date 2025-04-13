@@ -28,19 +28,12 @@ const OrganisationSchema = new mongoose.Schema({
     athlete: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
-      validate: {
-        validator: async function(userId) {
-          const user = await mongoose.model('User').findById(userId).populate('role');
-          return user.role.name === "Athlete"; // 'Sporcu' rolünün adını kontrol et
-        },
-        message: "Sadece sporcu rolündeki kullanıcılar eklenebilir!"
-      }
+      required: true
     },
-    weight: { type: Number, required: true }, // Katılımcının kilosu
-    coach: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Sorumlu antrenör
-    addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // Ekleyen kullanıcı
-    addedAt: { type: Date, default: Date.now } // Eklenme tarihi
+    weight: { type: Number, required: true },
+    coach: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    addedAt: { type: Date, default: Date.now }
   }],
 
   // Durum Bilgisi
@@ -52,6 +45,38 @@ const OrganisationSchema = new mongoose.Schema({
 
   // Ek Bilgiler
   createdAt: { type: Date, default: Date.now }
+});
+
+// Pre-save middleware ile katılımcıları kontrol et ve temizle
+OrganisationSchema.pre('save', async function(next) {
+  if (this.isModified('participants')) {
+    try {
+      // Tüm katılımcıların athlete ID'lerini al
+      const athleteIds = this.participants.map(p => p.athlete);
+      
+      // Tüm sporcuları bir kerede getir
+      const athletes = await mongoose.model('User')
+        .find({ _id: { $in: athleteIds } })
+        .populate('role');
+      
+      // Geçerli sporcuların ID'lerini oluştur
+      const validAthleteIds = new Set(
+        athletes
+          .filter(athlete => athlete && athlete.role && athlete.role.name === "Athlete")
+          .map(athlete => athlete._id.toString())
+      );
+      
+      // Geçerli katılımcıları filtrele
+      this.participants = this.participants.filter(p => 
+        p.athlete && validAthleteIds.has(p.athlete.toString())
+      );
+    } catch (error) {
+      console.error('Katılımcı temizleme hatası:', error);
+      // Hata durumunda tüm katılımcıları temizle
+      this.participants = [];
+    }
+  }
+  next();
 });
 
 module.exports = mongoose.model("Organisation", OrganisationSchema);

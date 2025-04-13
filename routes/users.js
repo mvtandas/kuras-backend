@@ -11,7 +11,7 @@ const Club = require("../models/club");
 const Belt = require("../models/belt");
 
 // Create a user
-router.post("/create-athlete", async (req, res) => {
+router.post("/create-athlete", auth, async (req, res) => {
   const {
     name,
     surname,
@@ -32,22 +32,35 @@ router.post("/create-athlete", async (req, res) => {
 
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !clubId || !sportStartDate || 
+      !motherName || !clubId || !sportStartDate || 
       !email || !password || !identityNumber) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
 
   try {
-    // Role, City ve Club varlığını kontrol et
-    const [role, city, club] = await Promise.all([
+    // Role ve Club varlığını kontrol et
+    const [role, club] = await Promise.all([
       Role.findOne({ name: "Athlete" }),
-      City.findById(cityId),
       Club.findById(clubId)
     ]);
 
-    if (!role || !city || !club) {
+    if (!role || !club) {
       return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
+        message: "Rol veya kulüp bulunamadı" 
+      });
+    }
+
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    let finalCityId = cityId;
+    if (req.user.role.name !== "Admin") {
+      finalCityId = req.user.city._id || req.user.city;
+    }
+
+    // Şehir varlığını kontrol et
+    const city = await City.findById(finalCityId);
+    if (!city) {
+      return res.status(404).json({ 
+        message: "Şehir bulunamadı" 
       });
     }
 
@@ -72,7 +85,7 @@ router.post("/create-athlete", async (req, res) => {
       birthDate,
       fatherName,
       motherName,
-      city: cityId,
+      city: finalCityId,
       club: clubId,
       role: role._id,
       sportStartDate,
@@ -275,10 +288,9 @@ router.get("/get-athletes", auth, async (req, res) => {
         name: req.user.name,
         role: req.user.role.name,
         city: req.user.city,
-        club: req.user.club
       });
 
-      if (!req.user.city || !req.user.club) {
+      if (!req.user.city) {
         return res.status(400).json({ 
           message: "Coach'un şehir veya kulüp bilgisi eksik" 
         });
@@ -286,16 +298,15 @@ router.get("/get-athletes", auth, async (req, res) => {
 
       // Şehir ve kulüp ID'lerini kontrol et
       const cityId = req.user.city._id || req.user.city;
-      const clubId = req.user.club._id || req.user.club;
 
-      if (!cityId || !clubId) {
+      if (!cityId ) {
         return res.status(400).json({ 
           message: "Coach'un şehir veya kulüp ID'si geçersiz" 
         });
       }
 
       query.city = cityId;
-      query.club = clubId;
+ 
     }
     // Eğer kullanıcı Referee ise, sadece kendi şehrindeki sporcuları göster
     else if (req.user.role.name === "Referee") {

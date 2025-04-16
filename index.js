@@ -5,15 +5,29 @@ const cors = require("cors");
 
 const app = express();
 
-app.options("*", cors()); // Tüm preflight isteklerine cevap ver
+// ✅ CORS middleware (en başta ve doğru şekilde)
+const allowedOrigins = ['https://www.turkiyekuras.com'];
 
-// Diğer middleware'ler
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+app.options("*", cors()); // preflight requests
+
+// 🔧 Diğer middleware'ler
 app.use(express.json());
 
-// Connect to DB
+// 🔌 Veritabanı bağlantısı
 connectDB();
 
-// Routes
+// 🛣️ Rotalar
 app.use("/api/roles", require("./routes/roles"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/cities", require("./routes/cities"));

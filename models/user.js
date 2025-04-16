@@ -64,6 +64,14 @@ const UserSchema = new mongoose.Schema({
   success: { type: String },
   weight: { type: Number },
   belt: { type: mongoose.Schema.Types.ObjectId, ref: "Belt" },
+  beltHistory: [
+    {
+      belt: { type: mongoose.Schema.Types.ObjectId, ref: "Belt", populate: true },
+      date: { type: Date, required: true },
+      note: { type: String },
+      updatedAt: { type: Date, default: Date.now }
+    }
+  ],
   athleteAchievements: [
     {
       rank: { type: Number },
@@ -73,6 +81,26 @@ const UserSchema = new mongoose.Schema({
       result: { type: String }
     }
   ],
+});
+
+// Belt değişikliğini otomatik olarak history'ye ekle
+UserSchema.pre('save', function(next) {
+  if (this.isModified('belt') && this.belt) {
+    if (!this.beltHistory) {
+      this.beltHistory = [];
+    }
+    
+    // Eğer son kayıt ile aynı kuşak değilse yeni kayıt ekle
+    if (this.beltHistory.length === 0 || 
+        this.beltHistory[this.beltHistory.length - 1].belt.toString() !== this.belt.toString()) {
+      this.beltHistory.push({
+        belt: this.belt,
+        date: new Date(),
+        note: 'Otomatik kayıt'
+      });
+    }
+  }
+  next();
 });
 
 module.exports = mongoose.model("User", UserSchema);

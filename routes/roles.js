@@ -22,7 +22,8 @@ router.post("/", async (req, res) => {
 router.get("/", auth, async (req, res) => {
   try {
     // Admin kontrolü
-    if (req.user.role !== "Admin") {
+    console.log(req.user.role);
+    if (req.user.role.name !== "Admin") {
       return res.status(403).json({ message: "Bu işlem için yetkiniz bulunmamaktadır" });
     }
 

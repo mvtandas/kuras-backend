@@ -27,7 +27,8 @@ router.post("/create-athlete", auth, async (req, res) => {
     password,
     identityNumber,
     belt,
-    weight
+    weight,
+    mobilePhone
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -95,7 +96,8 @@ router.post("/create-athlete", auth, async (req, res) => {
       identityNumber,
       isAthlete: true,
       belt: beltId,
-      weight
+      weight,
+      mobilePhone
     });
 
     await user.save();
@@ -152,27 +154,19 @@ router.post("/update-athlete/:id", async (req, res) => {
     weight
   } = req.body;
 
-  // Tüm gerekli alanların kontrolü
-  if (
-    !name || !surname || !gender || !birthDate || !fatherName || 
-    !motherName || !cityId || !clubId || !sportStartDate || 
-    !email || !identityNumber
-  ) {
-    return res.status(400).json({ message: "Tüm alanlar zorunludur" });
-  }
-
   try {
-    // Role, City ve Club varlığını kontrol et
-    const [role, city, club] = await Promise.all([
-      Role.findOne({ name: "Athlete" }),
-      City.findById(cityId),
-      Club.findById(clubId)
-    ]);
+    // Güncelleme işlemi
+    const athlete = await User.findById(req.params.id);
+    if (!athlete) {
+      return res.status(404).json({ message: "Sporcu bulunamadı" });
+    }
 
-    if (!role || !city || !club) {
-      return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
-      });
+    // Eğer e-posta değişiyorsa ve yeni e-posta başka bir kullanıcı tarafından kullanılıyorsa hata döndür
+    if (email && email !== athlete.email) {
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({ message: "Bu e-posta adresi zaten kullanılıyor" });
+      }
     }
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
@@ -186,53 +180,48 @@ router.post("/update-athlete/:id", async (req, res) => {
       }
     }
 
-    // Güncelleme işlemi
-    const athlete = await User.findById(req.params.id);
-    if (!athlete) {
-      return res.status(404).json({ message: "Sporcu bulunamadı" });
-    }
+    // Sadece gönderilen alanları güncelle
+    const updateFields = {};
+    if (name) updateFields.name = name;
+    if (surname) updateFields.surname = surname;
+    if (gender) updateFields.gender = gender;
+    if (birthDate) updateFields.birthDate = birthDate;
+    if (fatherName) updateFields.fatherName = fatherName;
+    if (motherName) updateFields.motherName = motherName;
+    if (cityId) updateFields.city = cityId;
+    if (clubId) updateFields.club = clubId;
+    if (sportStartDate) updateFields.sportStartDate = sportStartDate;
+    if (athleteLicenseNo) updateFields.athleteLicenseNo = athleteLicenseNo;
+    if (email) updateFields.email = email;
+    if (identityNumber) updateFields.identityNumber = identityNumber;
+    if (bloodType) updateFields.bloodType = bloodType;
+    if (religion) updateFields.religion = religion;
+    if (nationality) updateFields.nationality = nationality;
+    if (serialNumber) updateFields.serialNumber = serialNumber;
+    if (educationStatus) updateFields.educationStatus = educationStatus;
+    if (language) updateFields.language = language;
+    if (bankInfo) updateFields.bankInfo = bankInfo;
+    if (passportInfo) updateFields.passportInfo = passportInfo;
+    if (workPhone) updateFields.workPhone = workPhone;
+    if (workAddress) updateFields.workAddress = workAddress;
+    if (homePhone) updateFields.homePhone = homePhone;
+    if (homeAddress) updateFields.homeAddress = homeAddress;
+    if (mobilePhone) updateFields.mobilePhone = mobilePhone;
+    if (website) updateFields.website = website;
+    if (coach) updateFields.coach = coach;
+    if (showInStatistics !== undefined) updateFields.showInStatistics = showInStatistics;
+    if (licenseNo) updateFields.licenseNo = licenseNo;
+    if (startDate) updateFields.startDate = startDate;
+    if (province) updateFields.province = province;
+    if (district) updateFields.district = district;
+    if (isVisuallyImpairedAthlete !== undefined) updateFields.isVisuallyImpairedAthlete = isVisuallyImpairedAthlete;
+    if (isHearingImpairedAthlete !== undefined) updateFields.isHearingImpairedAthlete = isHearingImpairedAthlete;
+    if (athleteAchievements) updateFields.athleteAchievements = athleteAchievements;
+    if (beltId) updateFields.belt = beltId;
+    if (weight !== undefined) updateFields.weight = weight;
 
-    // Verilen tüm alanları güncelle
-    Object.assign(athlete, {
-      name,
-      surname,
-      gender,
-      birthDate,
-      fatherName,
-      motherName,
-      city: cityId,
-      club: clubId,
-      role: role._id,
-      sportStartDate,
-      athleteLicenseNo,
-      email,
-      identityNumber,
-      bloodType,
-      religion,
-      nationality,
-      serialNumber,
-      educationStatus,
-      language,
-      bankInfo,
-      passportInfo,
-      workPhone,
-      workAddress,
-      homePhone,
-      homeAddress,
-      mobilePhone,
-      website,
-      coach,
-      showInStatistics,
-      licenseNo,
-      startDate,
-      province,
-      district,
-      isVisuallyImpairedAthlete,
-      isHearingImpairedAthlete,
-      athleteAchievements,
-      belt: beltId,
-      weight
-    });
+    // Verilen alanları güncelle
+    Object.assign(athlete, updateFields);
 
     // Kaydet ve yanıt dön
     await athlete.save();
@@ -423,7 +412,19 @@ router.get("/get-athlete/:id", auth, async (req, res) => {
   try {
     const athlete = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id"
+          }
+        }
+      ]);
 
     if (!athlete) {
       return res.status(404).json({ message: "Sporcu bulunamadı" });
@@ -455,7 +456,9 @@ router.post("/create-coach", async (req, res) => {
     athleteLicenseNo,
     email,
     password,
-    identityNumber
+    identityNumber,
+    belt,
+    mobilePhone
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -479,6 +482,17 @@ router.post("/create-coach", async (req, res) => {
       });
     }
 
+    // Eğer belt bir string ise, ilgili Belt belgesini bul
+    let beltId = belt;
+    if (belt && typeof belt === 'string') {
+      const beltDoc = await Belt.findOne({ name: belt });
+      if (beltDoc) {
+        beltId = beltDoc._id;
+      } else {
+        return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({
       name,
@@ -494,7 +508,9 @@ router.post("/create-coach", async (req, res) => {
       athleteLicenseNo,
       email,
       password: hashedPassword,
-      isCoach: true
+      isCoach: true,
+      belt: beltId,
+      mobilePhone
     });
 
     await user.save();
@@ -548,6 +564,7 @@ router.post("/update-coach/:id", async (req, res) => {
     coachStatus,
     promotion,
     promotionDate,
+    belt
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -569,6 +586,17 @@ router.post("/update-coach/:id", async (req, res) => {
       return res.status(404).json({ 
         message: "Rol, şehir veya kulüp bulunamadı" 
       });
+    }
+
+    // Eğer belt bir string ise, ilgili Belt belgesini bul
+    let beltId = belt;
+    if (belt && typeof belt === 'string') {
+      const beltDoc = await Belt.findOne({ name: belt });
+      if (beltDoc) {
+        beltId = beltDoc._id;
+      } else {
+        return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
+      }
     }
 
     // Güncelleme işlemi
@@ -615,6 +643,7 @@ router.post("/update-coach/:id", async (req, res) => {
       coachStatus,
       promotion,
       promotionDate,
+      belt: beltId
     });
 
     // Kaydet ve yanıt dön
@@ -625,7 +654,6 @@ router.post("/update-coach/:id", async (req, res) => {
     console.error(error);
     res.status(500).json({ message: "Sunucu hatası" });
   }
-
 });
 
 router.post("/delete-coach/:id", async (req, res) => {
@@ -689,15 +717,22 @@ router.get("/get-coach/:id", auth, async (req, res) => {
   try {
     const coach = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id"
+          }
+        }
+      ]);
 
     if (!coach) {
       return res.status(404).json({ message: "Antrenör bulunamadı" });
-    }
-
-    // Eğer kullanıcı Coach ise ve antrenör farklı bir şehirdeyse erişimi engelle
-    if (req.user.role.name === "Coach" && coach.city._id.toString() !== req.user.city._id.toString()) {
-      return res.status(403).json({ message: "Bu antrenöre erişim yetkiniz yok" });
     }
 
     res.status(200).json(coach);
@@ -763,7 +798,9 @@ router.post("/create-referee", async (req, res) => {
     email,
     password,
     identityNumber,
-    refereeStatus
+    refereeStatus,
+    belt,
+    mobilePhone
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -786,6 +823,17 @@ router.post("/create-referee", async (req, res) => {
       });
     }
 
+    // Eğer belt bir string ise, ilgili Belt belgesini bul
+    let beltId = belt;
+    if (belt && typeof belt === 'string') {
+      const beltDoc = await Belt.findOne({ name: belt });
+      if (beltDoc) {
+        beltId = beltDoc._id;
+      } else {
+        return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({
       name,
@@ -801,6 +849,8 @@ router.post("/create-referee", async (req, res) => {
       email,
       password: hashedPassword,
       isReferee: true,
+      belt: beltId,
+      mobilePhone
     });
 
     await user.save();
@@ -851,6 +901,7 @@ router.post("/update-referee/:id", async (req, res) => {
     isReferee,
     refereeVisaYear,
     refereeStatus,
+    belt
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -876,14 +927,22 @@ try {
     });
   }
 
+  // Eğer belt bir string ise, ilgili Belt belgesini bul
+  let beltId = belt;
+  if (belt && typeof belt === 'string') {
+    const beltDoc = await Belt.findOne({ name: belt });
+    if (beltDoc) {
+      beltId = beltDoc._id;
+    } else {
+      return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
+    }
+  }
 
   // Güncelleme işlemi
   const referee = await User.findById(req.params.id);
   if (!referee) {
     return res.status(404).json({ message: "Hakem bulunamadı" });
   }
-
-
 
   // Verilen tüm alanları güncelle
   Object.assign(referee, {
@@ -920,7 +979,8 @@ try {
     institutionPosition,
     isReferee,
     refereeVisaYear,
-    refereeStatus
+    refereeStatus,
+    belt: beltId
   });
 
   // Kaydet ve yanıt dön
@@ -975,15 +1035,22 @@ router.get("/get-referee/:id", auth, async (req, res) => {
   try {
     const referee = await User.findById(req.params.id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id"
+          }
+        }
+      ]);
 
     if (!referee) {
       return res.status(404).json({ message: "Hakem bulunamadı" });
-    }
-
-    // Eğer kullanıcı Coach ise ve hakem farklı bir şehirdeyse erişimi engelle
-    if (req.user.role.name === "Coach" && referee.city._id.toString() !== req.user.city._id.toString()) {
-      return res.status(403).json({ message: "Bu hakeme erişim yetkiniz yok" });
     }
 
     res.status(200).json(referee);
@@ -1005,7 +1072,8 @@ router.post("/create-representetive", async (req, res) => {
     sportStartDate,
     email,
     password,
-    identityNumber
+    identityNumber,
+    mobilePhone
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -1042,6 +1110,7 @@ router.post("/create-representetive", async (req, res) => {
       email,
       password: hashedPassword,
       isProvincialRepresentative: true,
+      mobilePhone
     });
 
     await user.save();
@@ -1091,7 +1160,7 @@ router.post("/update-representetive/:id", async (req, res) => {
     institutionPosition,
     isProvincialRepresentative,
     promotion,
-    promotionDate,
+    promotionDate
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -1154,7 +1223,7 @@ router.post("/update-representetive/:id", async (req, res) => {
       institutionPosition,
       isProvincialRepresentative,
       promotion,
-      promotionDate,
+      promotionDate
     });
 
     // Kaydet ve yanıt dön
@@ -1242,7 +1311,8 @@ router.post("/create-personel", async (req, res) => {
     athleteLicenseNo,
     email,
     password,
-    identityNumber
+    identityNumber,
+    mobilePhone
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -1282,6 +1352,7 @@ router.post("/create-personel", async (req, res) => {
       email,
       password: hashedPassword,
       isStaff: true,
+      mobilePhone
     });
 
     await user.save();
@@ -1312,7 +1383,8 @@ router.post("/update-personel/:id", async (req, res) => {
     athleteLicenseNo,
     email,
     password,
-    identityNumber
+    identityNumber,
+    mobilePhone
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -1355,6 +1427,7 @@ router.post("/update-personel/:id", async (req, res) => {
     personel.athleteLicenseNo = athleteLicenseNo;
     personel.email = email;
     personel.identityNumber = identityNumber;
+    personel.mobilePhone = mobilePhone;
 
     await personel.save();
 
@@ -1600,6 +1673,146 @@ router.put("/change-password/:userId", auth, async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// BeltHistory için CRUD işlemleri
+router.post("/:userId/belt-history", auth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { belt, date, note } = req.body;
+
+    if (!belt || !date) {
+      return res.status(400).json({ message: "Kemer ve tarih bilgisi zorunludur" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    // BeltHistory'ye yeni kayıt ekle
+    user.beltHistory.push({
+      belt,
+      date: new Date(date),
+      note: note || '',
+      updatedAt: new Date()
+    });
+
+    await user.save();
+
+    // Güncellenmiş kullanıcıyı döndür
+    const updatedUser = await User.findById(userId)
+      .select("-password")
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id"
+          }
+        }
+      ]);
+
+    res.status(201).json(updatedUser);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.put("/:userId/belt-history/:historyId", auth, async (req, res) => {
+  try {
+    const { userId, historyId } = req.params;
+    const { belt, date, note } = req.body;
+
+    if (!belt || !date) {
+      return res.status(400).json({ message: "Kemer ve tarih bilgisi zorunludur" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    // BeltHistory'deki ilgili kaydı bul ve güncelle
+    const historyIndex = user.beltHistory.findIndex(h => h._id.toString() === historyId);
+    if (historyIndex === -1) {
+      return res.status(404).json({ message: "Kuşak geçmişi kaydı bulunamadı" });
+    }
+
+    user.beltHistory[historyIndex] = {
+      ...user.beltHistory[historyIndex].toObject(),
+      belt,
+      date: new Date(date),
+      note: note || user.beltHistory[historyIndex].note,
+      updatedAt: new Date()
+    };
+
+    await user.save();
+
+    // Güncellenmiş kullanıcıyı döndür
+    const updatedUser = await User.findById(userId)
+      .select("-password")
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id"
+          }
+        }
+      ]);
+
+    res.status(200).json(updatedUser);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+router.delete("/:userId/belt-history/:historyId", auth, async (req, res) => {
+  try {
+    const { userId, historyId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    // BeltHistory'den ilgili kaydı sil
+    user.beltHistory = user.beltHistory.filter(h => h._id.toString() !== historyId);
+    await user.save();
+
+    // Güncellenmiş kullanıcıyı döndür
+    const updatedUser = await User.findById(userId)
+      .select("-password")
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id"
+          }
+        }
+      ]);
+
+    res.status(200).json(updatedUser);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
   }
 });
 

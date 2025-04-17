@@ -39,21 +39,33 @@ router.post("/create-athlete", auth, async (req, res) => {
   }
 
   try {
-    // Role ve Club varlığını kontrol et
-    const [role, club, city] = await Promise.all([
-      Role.findOne({ name: "Athlete" }),
-      Club.findById(clubId),
-      City.findById(cityId)
+    // Role, City ve Club varlığını kontrol et
+    const [role, city, club] = await Promise.all([
+      Role.findById(roleId),
+      City.findById(cityId),
+      Club.findById(clubId)
     ]);
 
-    if (!role || !club || !city) {
+    if (!role) {
       return res.status(404).json({ 
-        message: "Rol, kulüp veya şehir bulunamadı" 
+        message: "Rol bulunamadı" 
+      });
+    }
+
+    if (!city) {
+      return res.status(404).json({ 
+        message: "Şehir bulunamadı" 
+      });
+    }
+
+    if (!club) {
+      return res.status(404).json({ 
+        message: "Kulüp bulunamadı" 
       });
     }
 
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    if (req.user.role.name !== "Admin") {
+    if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
       if (!userCity) {
         return res.status(400).json({ 
@@ -1377,9 +1389,21 @@ router.post("/create-personel", async (req, res) => {
       Club.findById(clubId)
     ]);
 
-    if (!role || !city || !club) {
+    if (!role) {
       return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
+        message: "Rol bulunamadı" 
+      });
+    }
+
+    if (!city) {
+      return res.status(404).json({ 
+        message: "Şehir bulunamadı" 
+      });
+    }
+
+    if (!club) {
+      return res.status(404).json({ 
+        message: "Kulüp bulunamadı" 
       });
     }
 
@@ -1464,10 +1488,37 @@ router.post("/update-personel/:id", async (req, res) => {
       Club.findById(clubId)
     ]);
 
-    if (!role || !city || !club) {
+    if (!role) {
       return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
+        message: "Rol bulunamadı" 
       });
+    }
+
+    if (!city) {
+      return res.status(404).json({ 
+        message: "Şehir bulunamadı" 
+      });
+    }
+
+    if (!club) {
+      return res.status(404).json({ 
+        message: "Kulüp bulunamadı" 
+      });
+    }
+
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize personel ekleyebilirsiniz" 
+        });
+      }
     }
 
     // Güncelleme işlemi

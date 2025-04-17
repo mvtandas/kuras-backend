@@ -34,35 +34,37 @@ router.post("/create-athlete", auth, async (req, res) => {
   // Tüm gerekli alanların kontrolü
   if (!name || !surname || !gender || !birthDate || !fatherName || 
       !motherName || !clubId || !sportStartDate || 
-      !email || !password || !identityNumber) {
+      !email || !password || !identityNumber || !cityId) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
 
   try {
     // Role ve Club varlığını kontrol et
-    const [role, club] = await Promise.all([
+    const [role, club, city] = await Promise.all([
       Role.findOne({ name: "Athlete" }),
-      Club.findById(clubId)
+      Club.findById(clubId),
+      City.findById(cityId)
     ]);
 
-    if (!role || !club) {
+    if (!role || !club || !city) {
       return res.status(404).json({ 
-        message: "Rol veya kulüp bulunamadı" 
+        message: "Rol, kulüp veya şehir bulunamadı" 
       });
     }
 
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    let finalCityId = cityId;
     if (req.user.role.name !== "Admin") {
-      finalCityId = req.user.city._id || req.user.city;
-    }
-
-    // Şehir varlığını kontrol et
-    const city = await City.findById(finalCityId);
-    if (!city) {
-      return res.status(404).json({ 
-        message: "Şehir bulunamadı" 
-      });
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize sporcu ekleyebilirsiniz" 
+        });
+      }
     }
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
@@ -86,7 +88,7 @@ router.post("/create-athlete", auth, async (req, res) => {
       birthDate,
       fatherName,
       motherName,
-      city: finalCityId,
+      city: cityId,
       club: clubId,
       role: role._id,
       sportStartDate,
@@ -482,6 +484,21 @@ router.post("/create-coach", async (req, res) => {
       });
     }
 
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize antrenör ekleyebilirsiniz" 
+        });
+      }
+    }
+
     // Eğer belt bir string ise, ilgili Belt belgesini bul
     let beltId = belt;
     if (belt && typeof belt === 'string') {
@@ -819,8 +836,23 @@ router.post("/create-referee", async (req, res) => {
 
     if (!role || !city) {
       return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
+        message: "Rol veya şehir bulunamadı" 
       });
+    }
+
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize hakem ekleyebilirsiniz" 
+        });
+      }
     }
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
@@ -1084,7 +1116,7 @@ router.post("/create-representetive", async (req, res) => {
   }
 
   try {
-    // Role, City ve Club varlığını kontrol et
+    // Role, City varlığını kontrol et
     const [role, city] = await Promise.all([
       Role.findOne({ name: "Representetive" }),
       City.findById(cityId),
@@ -1092,8 +1124,23 @@ router.post("/create-representetive", async (req, res) => {
 
     if (!role || !city) {
       return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
+        message: "Rol veya şehir bulunamadı" 
       });
+    }
+
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize temsilci ekleyebilirsiniz" 
+        });
+      }
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -1334,6 +1381,21 @@ router.post("/create-personel", async (req, res) => {
       return res.status(404).json({ 
         message: "Rol, şehir veya kulüp bulunamadı" 
       });
+    }
+
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize personel ekleyebilirsiniz" 
+        });
+      }
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);

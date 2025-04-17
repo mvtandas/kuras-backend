@@ -6,7 +6,7 @@ const cors = require("cors");
 const app = express();
 
 // ✅ CORS middleware (en başta ve doğru şekilde)
-const allowedOrigins = ['https://www.turkiyekuras.com'];
+const allowedOrigins = ['https://www.turkiyekuras.com','http://localhost:5173','https://turkiyekuras.com'];
 
 app.use(cors({
   origin: function (origin, callback) {

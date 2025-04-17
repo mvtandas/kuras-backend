@@ -39,12 +39,19 @@ router.post("/create-athlete", auth, async (req, res) => {
   }
 
   try {
+    console.log("Gelen cityId:", cityId);
+    console.log("Gelen clubId:", clubId);
+
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
       Role.findOne({ name: "Athlete" }),
       City.findById(cityId),
       Club.findById(clubId)
     ]);
+
+    console.log("Bulunan role:", role);
+    console.log("Bulunan city:", city);
+    console.log("Bulunan club:", club);
 
     if (!role) {
       return res.status(404).json({ 
@@ -54,7 +61,7 @@ router.post("/create-athlete", auth, async (req, res) => {
 
     if (!city) {
       return res.status(404).json({ 
-        message: "Şehir bulunamadı" 
+        message: `Şehir bulunamadı (ID: ${cityId})` 
       });
     }
 
@@ -67,6 +74,8 @@ router.post("/create-athlete", auth, async (req, res) => {
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
+      console.log("Kullanıcının şehri:", userCity);
+      
       if (!userCity) {
         return res.status(400).json({ 
           message: "Kullanıcının şehir bilgisi geçersiz" 

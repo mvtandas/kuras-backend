@@ -41,7 +41,7 @@ router.post("/create-athlete", auth, async (req, res) => {
   try {
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
-      Role.findById(roleId),
+      Role.findOne({ name: "Athlete" }),
       City.findById(cityId),
       Club.findById(clubId)
     ]);

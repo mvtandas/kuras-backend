@@ -12,7 +12,7 @@ const Belt = require("../models/belt");
 
 // Create a user
 router.post("/create-athlete", auth, async (req, res) => {
-  const {
+  let {
     name,
     surname,
     gender,
@@ -32,60 +32,72 @@ router.post("/create-athlete", auth, async (req, res) => {
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
-  if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !clubId || !sportStartDate || 
-      !email || !password || !identityNumber || !cityId) {
-    return res.status(400).json({ message: "Tüm alanlar zorunludur" });
+  const requiredFields = {
+    name: "İsim",
+    surname: "Soyisim",
+    gender: "Cinsiyet",
+    birthDate: "Doğum Tarihi",
+    fatherName: "Baba Adı",
+    motherName: "Anne Adı",
+    sportStartDate: "Spor Başlangıç Tarihi",
+    email: "E-posta",
+    password: "Şifre",
+    identityNumber: "Kimlik Numarası",
+    clubId: "Kulüp"
+  };
+
+  // Eğer kullanıcı admin ise, şehir ve kulüp alanlarını zorunlu yap
+  if (req.user && req.user.role.name === "Admin") {
+    requiredFields.cityId = "Şehir";
+  }
+
+  const missingFields = [];
+  for (const [field, label] of Object.entries(requiredFields)) {
+    if (!req.body[field]) {
+      missingFields.push(label);
+    }
+  }
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({ 
+      message: "Eksik alanlar var", 
+      missingFields: missingFields 
+    });
   }
 
   try {
-    console.log("Gelen cityId:", cityId);
-    console.log("Gelen clubId:", clubId);
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      if (!req.user.city) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi bulunamadı" 
+        });
+      }
 
-    // Role, City ve Club varlığını kontrol et
-    const [role, city, club] = await Promise.all([
-      Role.findOne({ name: "Athlete" }),
-      City.findById(cityId),
-      Club.findById(clubId)
-    ]);
-
-    console.log("Bulunan role:", role);
-    console.log("Bulunan city:", city);
-    console.log("Bulunan club:", club);
-
-    if (!role) {
-      return res.status(404).json({ 
-        message: "Rol bulunamadı" 
-      });
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      // Şehir ID'sini kullanıcının şehri olarak güncelle
+      cityId = userCity._id;
     }
 
+    // Şehir kontrolü
+    const city = await City.findById(cityId);
     if (!city) {
       return res.status(404).json({ 
         message: `Şehir bulunamadı (ID: ${cityId})` 
       });
     }
 
-    if (!club) {
+    // Role kontrolü
+    const role = await Role.findOne({ name: "Athlete" });
+    if (!role) {
       return res.status(404).json({ 
-        message: "Kulüp bulunamadı" 
+        message: "Rol bulunamadı" 
       });
-    }
-
-    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    if (req.user && req.user.role.name !== "Admin") {
-      const userCity = await City.findById(req.user.city._id || req.user.city);
-      console.log("Kullanıcının şehri:", userCity);
-      
-      if (!userCity) {
-        return res.status(400).json({ 
-          message: "Kullanıcının şehir bilgisi geçersiz" 
-        });
-      }
-      if (userCity._id.toString() !== cityId) {
-        return res.status(403).json({ 
-          message: "Sadece kendi şehrinize sporcu ekleyebilirsiniz" 
-        });
-      }
     }
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
@@ -492,19 +504,6 @@ router.post("/create-coach", async (req, res) => {
   }
 
   try {
-    // Role, City ve Club varlığını kontrol et
-    const [role, city, club] = await Promise.all([
-      Role.findOne({ name: "Coach" }),
-      City.findById(cityId),
-      Club.findById(clubId)
-    ]);
-
-    if (!role || !city || !club) {
-      return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
-      });
-    }
-
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
@@ -613,17 +612,19 @@ router.post("/update-coach/:id", async (req, res) => {
   }
 
   try {
-    // Role, City ve Club varlığını kontrol et
-    const [role, city, club] = await Promise.all([
-      Role.findOne({ name: "Coach" }),
-      City.findById(cityId),
-      Club.findById(clubId)
-    ]);
-
-    if (!role || !city || !club) {
-      return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
-      });
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize antrenör ekleyebilirsiniz" 
+        });
+      }
     }
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
@@ -849,18 +850,6 @@ router.post("/create-referee", async (req, res) => {
   }
 
   try {
-    // Role, City varlığını kontrol et
-    const [role, city] = await Promise.all([
-      Role.findOne({ name: "Referee" }),
-      City.findById(cityId),
-    ]);
-
-    if (!role || !city) {
-      return res.status(404).json({ 
-        message: "Rol veya şehir bulunamadı" 
-      });
-    }
-
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
@@ -968,16 +957,19 @@ router.post("/update-referee/:id", async (req, res) => {
 
 try {
 
-  // Role, City ve Club varlığını kontrol et
-  const [role, city] = await Promise.all([
-    Role.findOne({ name: "Referee" }),
-    City.findById(cityId),
-  ]);
-
-  if (!role || !city) {
-    return res.status(404).json({ 
-      message: "Rol, şehir bulunamadı" 
-    });
+  // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+  if (req.user && req.user.role.name !== "Admin") {
+    const userCity = await City.findById(req.user.city._id || req.user.city);
+    if (!userCity) {
+      return res.status(400).json({ 
+        message: "Kullanıcının şehir bilgisi geçersiz" 
+      });
+    }
+    if (userCity._id.toString() !== cityId) {
+      return res.status(403).json({ 
+        message: "Sadece kendi şehrinize hakem ekleyebilirsiniz" 
+      });
+    }
   }
 
   // Eğer belt bir string ise, ilgili Belt belgesini bul
@@ -1137,18 +1129,6 @@ router.post("/create-representetive", async (req, res) => {
   }
 
   try {
-    // Role, City varlığını kontrol et
-    const [role, city] = await Promise.all([
-      Role.findOne({ name: "Representetive" }),
-      City.findById(cityId),
-    ]);
-
-    if (!role || !city) {
-      return res.status(404).json({ 
-        message: "Rol veya şehir bulunamadı" 
-      });
-    }
-
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
@@ -1239,16 +1219,19 @@ router.post("/update-representetive/:id", async (req, res) => {
   }
 
   try {
-    // Role, City ve Club varlığını kontrol et
-    const [role, city] = await Promise.all([
-      Role.findOne({ name: "Representetive" }),
-      City.findById(cityId),
-    ]);
-
-    if (!role || !city) {
-      return res.status(404).json({ 
-        message: "Rol, şehir veya kulüp bulunamadı" 
-      });
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize temsilci ekleyebilirsiniz" 
+        });
+      }
     }
 
     // Güncelleme işlemi
@@ -1391,6 +1374,21 @@ router.post("/create-personel", async (req, res) => {
   }
 
   try {
+    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
+    if (req.user && req.user.role.name !== "Admin") {
+      const userCity = await City.findById(req.user.city._id || req.user.city);
+      if (!userCity) {
+        return res.status(400).json({ 
+          message: "Kullanıcının şehir bilgisi geçersiz" 
+        });
+      }
+      if (userCity._id.toString() !== cityId) {
+        return res.status(403).json({ 
+          message: "Sadece kendi şehrinize personel ekleyebilirsiniz" 
+        });
+      }
+    }
+
     // Role, City ve Club varlığını kontrol et
     const [role, city, club] = await Promise.all([
       Role.findById(roleId),
@@ -1414,21 +1412,6 @@ router.post("/create-personel", async (req, res) => {
       return res.status(404).json({ 
         message: "Kulüp bulunamadı" 
       });
-    }
-
-    // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    if (req.user && req.user.role.name !== "Admin") {
-      const userCity = await City.findById(req.user.city._id || req.user.city);
-      if (!userCity) {
-        return res.status(400).json({ 
-          message: "Kullanıcının şehir bilgisi geçersiz" 
-        });
-      }
-      if (userCity._id.toString() !== cityId) {
-        return res.status(403).json({ 
-          message: "Sadece kendi şehrinize personel ekleyebilirsiniz" 
-        });
-      }
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -1490,31 +1473,6 @@ router.post("/update-personel/:id", async (req, res) => {
   }
 
   try {
-    // Role, City ve Club varlığını kontrol et
-    const [role, city, club] = await Promise.all([
-      Role.findById(roleId),
-      City.findById(cityId),
-      Club.findById(clubId)
-    ]);
-
-    if (!role) {
-      return res.status(404).json({ 
-        message: "Rol bulunamadı" 
-      });
-    }
-
-    if (!city) {
-      return res.status(404).json({ 
-        message: "Şehir bulunamadı" 
-      });
-    }
-
-    if (!club) {
-      return res.status(404).json({ 
-        message: "Kulüp bulunamadı" 
-      });
-    }
-
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);

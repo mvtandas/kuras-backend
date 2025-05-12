@@ -504,6 +504,14 @@ router.post("/create-coach", async (req, res) => {
   }
 
   try {
+    // Role kontrolü
+    const role = await Role.findOne({ name: "Coach" });
+    if (!role) {
+      return res.status(404).json({ 
+        message: "Rol bulunamadı" 
+      });
+    }
+
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);

@@ -99,17 +99,6 @@ router.post("/create-athlete", auth, async (req, res) => {
       });
     }
 
-    // Eğer belt bir string ise, ilgili Belt belgesini bul
-    let beltId = belt;
-    if (belt && typeof belt === "string") {
-      const beltDoc = await Belt.findOne({ name: belt });
-      if (beltDoc) {
-        beltId = beltDoc._id;
-      } else {
-        return res.status(400).json({ message: "Belirtilen kemer bulunamadı" });
-      }
-    }
-
     const isAthlete = true;
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -129,10 +118,25 @@ router.post("/create-athlete", auth, async (req, res) => {
       password: hashedPassword,
       identityNumber,
       isAthlete: true,
-      belt: beltId,
+
       weight,
       mobilePhone,
     });
+
+    if (belt) {
+      let beltId = belt;
+      if (belt && typeof belt === "string") {
+        const beltDoc = await Belt.findOne({ name: belt });
+        if (beltDoc) {
+          beltId = beltDoc._id;
+        } else {
+          return res
+            .status(400)
+            .json({ message: "Belirtilen kemer bulunamadı" });
+        }
+      }
+      user.belt = beltId;
+    }
 
     await user.save();
 
@@ -548,7 +552,7 @@ router.post("/create-coach", async (req, res) => {
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
     let beltId = belt;
-    if (belt && typeof belt === "string" && belt.trim() !== '') {
+    if (belt && typeof belt === "string" && belt.trim() !== "") {
       const beltDoc = await Belt.findOne({ name: belt });
       if (beltDoc) {
         beltId = beltDoc._id;
@@ -630,13 +634,22 @@ router.post("/update-coach/:id", async (req, res) => {
     coachStatus,
     promotion,
     promotionDate,
-    belt
+    belt,
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
-  if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || !clubId || 
-      !email || !identityNumber) {
+  if (
+    !name ||
+    !surname ||
+    !gender ||
+    !birthDate ||
+    !fatherName ||
+    !motherName ||
+    !cityId ||
+    !clubId ||
+    !email ||
+    !identityNumber
+  ) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
 
@@ -644,8 +657,8 @@ router.post("/update-coach/:id", async (req, res) => {
     // Role kontrolü
     const role = await Role.findOne({ name: "Coach" });
     if (!role) {
-      return res.status(404).json({ 
-        message: "Rol bulunamadı" 
+      return res.status(404).json({
+        message: "Rol bulunamadı",
       });
     }
 
@@ -653,20 +666,20 @@ router.post("/update-coach/:id", async (req, res) => {
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
       if (!userCity) {
-        return res.status(400).json({ 
-          message: "Kullanıcının şehir bilgisi geçersiz" 
+        return res.status(400).json({
+          message: "Kullanıcının şehir bilgisi geçersiz",
         });
       }
       if (userCity._id.toString() !== cityId) {
-        return res.status(403).json({ 
-          message: "Sadece kendi şehrinize antrenör ekleyebilirsiniz" 
+        return res.status(403).json({
+          message: "Sadece kendi şehrinize antrenör ekleyebilirsiniz",
         });
       }
     }
 
     // Eğer belt bir string ise, ilgili Belt belgesini bul
     let beltId = belt;
-    if (belt && typeof belt === 'string' && belt.trim() !== '') {
+    if (belt && typeof belt === "string" && belt.trim() !== "") {
       const beltDoc = await Belt.findOne({ name: belt });
       if (beltDoc) {
         beltId = beltDoc._id;
@@ -720,7 +733,7 @@ router.post("/update-coach/:id", async (req, res) => {
       isCoach,
       coachStatus,
       promotion,
-      promotionDate
+      promotionDate,
     };
 
     // Sadece belt değeri varsa ekle
@@ -1290,13 +1303,21 @@ router.post("/update-representetive/:id", async (req, res) => {
     institutionPosition,
     isProvincialRepresentative,
     promotion,
-    promotionDate
+    promotionDate,
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
-  if (!name || !surname || !gender || !birthDate || !fatherName || 
-      !motherName || !cityId || 
-      !email || !identityNumber) {
+  if (
+    !name ||
+    !surname ||
+    !gender ||
+    !birthDate ||
+    !fatherName ||
+    !motherName ||
+    !cityId ||
+    !email ||
+    !identityNumber
+  ) {
     return res.status(400).json({ message: "Tüm alanlar zorunludur" });
   }
 
@@ -1304,8 +1325,8 @@ router.post("/update-representetive/:id", async (req, res) => {
     // Role kontrolü
     const role = await Role.findOne({ name: "Representetive" });
     if (!role) {
-      return res.status(404).json({ 
-        message: "Rol bulunamadı" 
+      return res.status(404).json({
+        message: "Rol bulunamadı",
       });
     }
 
@@ -1313,13 +1334,13 @@ router.post("/update-representetive/:id", async (req, res) => {
     if (req.user && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
       if (!userCity) {
-        return res.status(400).json({ 
-          message: "Kullanıcının şehir bilgisi geçersiz" 
+        return res.status(400).json({
+          message: "Kullanıcının şehir bilgisi geçersiz",
         });
       }
       if (userCity._id.toString() !== cityId) {
-        return res.status(403).json({ 
-          message: "Sadece kendi şehrinize temsilci ekleyebilirsiniz" 
+        return res.status(403).json({
+          message: "Sadece kendi şehrinize temsilci ekleyebilirsiniz",
         });
       }
     }
@@ -1364,13 +1385,15 @@ router.post("/update-representetive/:id", async (req, res) => {
       institutionPosition,
       isProvincialRepresentative,
       promotion,
-      promotionDate
+      promotionDate,
     });
 
     // Kaydet ve yanıt dön
     await representetive.save();
 
-    res.status(200).json({ message: "Temsilci başarıyla güncellendi", representetive });
+    res
+      .status(200)
+      .json({ message: "Temsilci başarıyla güncellendi", representetive });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Sunucu hatası" });
@@ -1711,14 +1734,11 @@ router.post("/login", async (req, res) => {
   try {
     // TC kimlik numarası veya e-posta ile kullanıcıyı bul
     const user = await User.findOne({
-      $or: [
-        { email: email },
-        { identityNumber: email }
-      ]
+      $or: [{ email: email }, { identityNumber: email }],
     }).populate("role");
 
     if (!user) return res.status(404).json({ message: "Kullanıcı bulunamadı" });
-    
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch)
       return res.status(400).json({ message: "Geçersiz kimlik bilgileri" });

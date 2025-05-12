@@ -15,7 +15,7 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, unique: true },
   password: { type: String, }, // Hashed password
   createdAt: { type: Date, default: Date.now },
-  identityNumber: { type: String},
+  identityNumber: { type: String, unique: true },
   nationality: { type: String },
   serialNumber: { type: String },
   bloodType: { type: String },

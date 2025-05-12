@@ -30,7 +30,7 @@ const OrganisationSchema = new mongoose.Schema({
       ref: "User",
       required: true
     },
-    weight: { type: Number, required: true },
+    weight: { type: String, required: true },
     coach: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     addedAt: { type: Date, default: Date.now }

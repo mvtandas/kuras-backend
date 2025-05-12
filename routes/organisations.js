@@ -198,7 +198,7 @@ router.post("/:id/participants", auth, async (req, res) => {
       // Geçerli katılımcıyı listeye ekle
       validParticipants.push({
         athlete: athleteId,
-        weight,
+        weight: weight.toString(),
         coach: coachId || null,
         addedBy: req.user.id
       });
@@ -562,7 +562,7 @@ router.put("/:id/participants/:athleteId", auth, async (req, res) => {
     }
     
     // Katılımcı bilgilerini güncelle
-    organisation.participants[participantIndex].weight = weight;
+    organisation.participants[participantIndex].weight = weight.toString();
     if (coachId !== undefined) {
       organisation.participants[participantIndex].coach = coachId || null;
     }

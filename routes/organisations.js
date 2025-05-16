@@ -88,8 +88,8 @@ router.get("/:id", auth, async (req, res) => {
     const user = await User.findById(req.user.id).populate("role");
     if (user.role.name === "Coach") {
       organisation.participants = organisation.participants.filter(p => 
-        p.addedBy._id.toString() === user.id.toString() || 
-        (p.coach && p.coach._id.toString() === user.id.toString())
+        (p.addedBy && p.addedBy._id && p.addedBy._id.toString() === user.id.toString()) || 
+        (p.coach && p.coach._id && p.coach._id.toString() === user.id.toString())
       );
     }
     

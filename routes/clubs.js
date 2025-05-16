@@ -4,7 +4,7 @@ const Club = require("../models/club");
 const auth = require("../middleware/auth");
 
 // Kulüp oluştur (sadece admin)
-router.post("/", async (req, res) => {
+router.post("/", auth, async (req, res) => {
   try {
     if (req.user.role.name !== "Admin") {
       return res

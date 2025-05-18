@@ -12,7 +12,7 @@ const UserSchema = new mongoose.Schema({
   role: { type: mongoose.Schema.Types.ObjectId, ref: "Role"},
   sportStartDate: { type: Date },
   athleteLicenseNo: { type: String},
-  email: { type: String, unique: true },
+  email: { type: String, index: false },
   password: { type: String, }, // Hashed password
   createdAt: { type: Date, default: Date.now },
   identityNumber: { type: String, unique: true },
@@ -32,7 +32,7 @@ const UserSchema = new mongoose.Schema({
   homePhone: { type: String },
   homeAddress: { type: String },
   mobilePhone: { type: String },
-  emailAddress: { type: String },
+  emailAddress: { type: String, required: false, sparse: true },
   website: { type: String },
   coach: { type: String },
   showInStatistics: { type: Boolean, default: false },

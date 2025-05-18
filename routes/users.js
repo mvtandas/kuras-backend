@@ -536,7 +536,7 @@ router.post("/create-coach", async (req, res) => {
     }
 
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    if (req.user && req.user.role.name !== "Admin") {
+    if (req.user && req.user.role && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
       if (!userCity) {
         return res.status(400).json({
@@ -663,7 +663,7 @@ router.post("/update-coach/:id", async (req, res) => {
     }
 
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    if (req.user && req.user.role.name !== "Admin") {
+    if (req.user && req.user.role && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
       if (!userCity) {
         return res.status(400).json({
@@ -920,8 +920,16 @@ router.post("/create-referee", async (req, res) => {
   }
 
   try {
+    // Role kontrolü
+    const role = await Role.findOne({ name: "Referee" });
+    if (!role) {
+      return res.status(404).json({
+        message: "Rol bulunamadı",
+      });
+    }
+
     // Eğer kullanıcı admin değilse, kendi şehir ID'sini kullan
-    if (req.user && req.user.role.name !== "Admin") {
+    if (req.user && req.user.role && req.user.role.name !== "Admin") {
       const userCity = await City.findById(req.user.city._id || req.user.city);
       if (!userCity) {
         return res.status(400).json({

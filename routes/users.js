@@ -1884,38 +1884,40 @@ router.put("/change-role/:userId", auth, async (req, res) => {
   }
 });
 
-// Kullanıcı şifresini değiştir (SADECE ADMIN)
-router.put("/change-password/:userId", auth, async (req, res) => {
+// Kullanıcının kendi şifresini değiştirmesi
+router.put("/change-my-password", auth, async (req, res) => {
   try {
-    // Admin kontrolü
-    const adminUser = await User.findById(req.user.id).populate("role");
-    if (adminUser.role.name !== "Admin") {
-      return res.status(403).json({ message: "Bu işlem için yetkiniz yok" });
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ 
+        message: "Mevcut şifre ve yeni şifre alanları zorunludur" 
+      });
     }
 
-    const { userId } = req.params;
-    const { newPassword } = req.body;
-
-    if (!newPassword) {
-      return res.status(400).json({ message: "Yeni şifre gereklidir" });
-    }
-
-    const user = await User.findById(userId);
+    const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: "Kullanıcı bulunamadı" });
     }
 
-    // Yeni şifreyi hashle
+    // Mevcut şifreyi kontrol et
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Mevcut şifre yanlış" });
+    }
+
+    // Yeni şifreyi hashle ve kaydet
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
 
     await user.save();
 
     res.status(200).json({
-      message: "Kullanıcı şifresi başarıyla değiştirildi",
+      message: "Şifreniz başarıyla değiştirildi"
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
   }
 });
 

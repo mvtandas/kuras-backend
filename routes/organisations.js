@@ -714,7 +714,7 @@ router.get("/:id/participants/export", auth, async (req, res) => {
       margin: 50,
       info: {
         Title: 'Organizasyon Katılımcıları',
-        Author: 'Türkiye Kuraş Federasyonu',
+        Author: 'Türkiye Kuraş',
         Subject: organisation.tournamentName
       }
     });
@@ -760,7 +760,7 @@ router.get("/:id/participants/export", auth, async (req, res) => {
       
       // Başlık alanı (tam genişlik)
       doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
-         .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+         .text('TURKIYE KURAS', pageMargin + 20, pageMargin + 15, { 
            width: doc.page.width - 2 * pageMargin - 40,
            align: 'center' 
          });
@@ -1104,7 +1104,7 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
       margin: 50,
       info: {
         Title: 'Tartı Listesi',
-        Author: 'Turkiye Kuras Federasyonu',
+        Author: 'Turkiye Kuras',
         Subject: organisation.tournamentName
       }
     });
@@ -1152,7 +1152,7 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
        .fill(colors.light);
     
     doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
-       .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+       .text('TURKIYE KURAS', pageMargin + 20, pageMargin + 15, { 
          width: doc.page.width - 2 * pageMargin - 40,
          align: 'center' 
        });
@@ -1241,7 +1241,7 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
            .fill(colors.light);
         
         doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
-           .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+           .text('TURKIYE KURAS', pageMargin + 20, pageMargin + 15, { 
              width: doc.page.width - 2 * pageMargin - 40,
              align: 'center' 
            });
@@ -1550,7 +1550,7 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
       
       // Başlık alanı (tam genişlik)
       doc.font('Times-Bold').fontSize(18).fillColor(colors.primary)
-         .text('TURKIYE KURAS FEDERASYONU', pageMargin + 20, pageMargin + 15, { 
+         .text('TURKIYE KURAS', pageMargin + 20, pageMargin + 15, { 
            width: doc.page.width - 2 * pageMargin - 40,
            align: 'center' 
          });

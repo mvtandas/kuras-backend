@@ -1014,10 +1014,14 @@ router.get("/:id/participants/export", auth, async (req, res) => {
 router.get("/:id/weighing-list", auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { weight, coordinator, chairman } = req.query;
+    const { weight, coordinator, chairman, gender } = req.query;
     
     if (!weight) {
       return res.status(400).json({ message: "Kilo bilgisi gereklidir" });
+    }
+
+    if (!gender) {
+      return res.status(400).json({ message: "Cinsiyet bilgisi gereklidir" });
     }
     
     // Organizasyonu bul ve katılımcıları populate et
@@ -1063,26 +1067,13 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
       });
     }
     
-    // Belirtilen kiloya göre katılımcıları filtrele
+    // Belirtilen kilo ve cinsiyete göre katılımcıları filtrele
     const filteredParticipants = participants.filter(p => 
       p.athlete && 
       p.athlete.city && 
-      p.weight.toString() === weight.toString()
+      p.weight.toString() === weight.toString() &&
+      p.athlete.gender === gender
     );
-    
-    // Kulüp bilgilerini ekle
-    filteredParticipants.forEach(participant => {
-      if (participant.athlete.club) {
-        if (typeof participant.athlete.club === 'string') {
-          const clubId = participant.athlete.club;
-          if (clubs[clubId]) {
-            participant.athlete.clubName = clubs[clubId];
-          }
-        } else if (participant.athlete.club.name) {
-          participant.athlete.clubName = participant.athlete.club.name;
-        }
-      }
-    });
     
     // Renk tanımlamaları
     const colors = {
@@ -1195,9 +1186,9 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
          align: 'center' 
        });
     
-    // Kilo bilgisi
+    // Kilo ve cinsiyet bilgisi
     doc.font('Times-Bold').fontSize(12).fillColor(colors.dark)
-       .text(`${weight} kg`, pageMargin, pageMargin + 140, { 
+       .text(`${weight} kg - ${turkishToAscii(gender)}`, pageMargin, pageMargin + 140, { 
          width: doc.page.width - 2 * pageMargin,
          align: 'center' 
        });
@@ -1252,15 +1243,15 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
              align: 'center' 
            });
         
-        // Kilo bilgisi
+        // Kilo ve cinsiyet bilgisi
         doc.font('Times-Bold').fontSize(12).fillColor(colors.dark)
-           .text(`${weight} kg (devam)`, pageMargin, pageMargin + 100, { 
+           .text(`${weight} kg - ${turkishToAscii(gender)}`, pageMargin, pageMargin + 140, { 
              width: doc.page.width - 2 * pageMargin,
              align: 'center' 
            });
         
         // Tablo başlıklarını yeniden çiz
-        tableTop = pageMargin + 130;
+        tableTop = pageMargin + 170;
         doc.rect(tableLeft, tableTop, colWidths.reduce((a, b) => a + b, 0), 25)
            .fill(colors.headerBg);
         
@@ -1467,17 +1458,34 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
     participants.forEach(participant => {
       if (participant.athlete && participant.weight) {
         const weight = participant.weight.toString();
+        const gender = participant.athlete.gender;
+        const key = `${weight}-${gender}`; // Kilo ve cinsiyet kombinasyonu
         
-        if (!participantsByWeight[weight]) {
-          participantsByWeight[weight] = [];
+        if (!participantsByWeight[key]) {
+          participantsByWeight[key] = {
+            weight,
+            gender,
+            participants: []
+          };
         }
         
-        participantsByWeight[weight].push(participant);
+        participantsByWeight[key].participants.push(participant);
       }
     });
     
     // Kilo kategorilerini sırala
-    const sortedWeights = Object.keys(participantsByWeight).sort((a, b) => parseInt(a) - parseInt(b));
+    const sortedWeights = Object.keys(participantsByWeight).sort((a, b) => {
+      const [weightA, genderA] = a.split('-');
+      const [weightB, genderB] = b.split('-');
+      
+      // Önce kiloya göre sırala
+      if (parseInt(weightA) !== parseInt(weightB)) {
+        return parseInt(weightA) - parseInt(weightB);
+      }
+      
+      // Aynı kiloda ise cinsiyete göre sırala (Kadın önce)
+      return genderA === 'Kadın' ? -1 : 1;
+    });
     
     // Renk tanımlamaları
     const colors = {
@@ -1630,7 +1638,9 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
     let contentY = drawHeader(doc);
     
     // Her kilo kategorisi için
-    sortedWeights.forEach((weight, weightIndex) => {
+    sortedWeights.forEach((weightKey, weightIndex) => {
+      const { weight, gender, participants } = participantsByWeight[weightKey];
+      
       // İlk kilo değilse ve sayfa sonuna yaklaşıldıysa yeni sayfa ekle
       if (weightIndex > 0 && contentY > doc.page.height - 200) {
         doc.addPage({ 
@@ -1646,7 +1656,7 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
          .fill(colors.accent);
       
       doc.font('Times-Bold').fontSize(12).fillColor(colors.white);
-      doc.text(`${weight} kg`, tableLeft + 10, contentY + 7, { 
+      doc.text(`${weight} kg - ${turkishToAscii(gender)}`, tableLeft + 10, contentY + 7, { 
         align: 'left',
         continued: false
       });
@@ -1661,7 +1671,7 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
       let rowIsColored = false;
       
       // Her katılımcı için
-      participantsByWeight[weight].forEach((participant, index) => {
+      participantsByWeight[weightKey].participants.forEach((participant, index) => {
         // Yeni sayfaya geçme kontrolü
         if (rowY > doc.page.height - 100) {
           doc.addPage({ 
@@ -1676,9 +1686,9 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
              .fill(colors.accent);
           
           doc.font('Times-Bold').fontSize(12).fillColor(colors.white);
-          doc.text(`${weight} kg (devam)`, tableLeft + 10, contentY + 7, { 
-            align: 'left',
-            continued: false
+          doc.text(`${weight} kg - ${turkishToAscii(gender)} (devam)`, pageMargin, pageMargin + 100, { 
+            width: doc.page.width - 2 * pageMargin,
+            align: 'center' 
           });
           
           contentY += 25;

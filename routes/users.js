@@ -118,9 +118,10 @@ router.post("/create-athlete", auth, async (req, res) => {
       password: hashedPassword,
       identityNumber,
       isAthlete: true,
-
       weight,
       mobilePhone,
+      createdBy: req.user.id,
+      addedAt: new Date(),
     });
 
     if (belt) {
@@ -143,7 +144,7 @@ router.post("/create-athlete", auth, async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate(["role", "city", "club", "belt", "createdBy"]);
 
     res.status(201).json(userResponse);
   } catch (err) {
@@ -323,22 +324,8 @@ router.get("/get-athletes", auth, async (req, res) => {
         city: req.user.city,
       });
 
-      if (!req.user.city) {
-        return res.status(400).json({
-          message: "Coach'un şehir veya kulüp bilgisi eksik",
-        });
-      }
-
-      // Şehir ve kulüp ID'lerini kontrol et
-      const cityId = req.user.city._id || req.user.city;
-
-      if (!cityId) {
-        return res.status(400).json({
-          message: "Coach'un şehir veya kulüp ID'si geçersiz",
-        });
-      }
-
-      query.city = cityId;
+      // Coach sadece kendi eklediği sporcuları görebilir
+      query.createdBy = req.user._id;
     }
     // Eğer kullanıcı Referee ise, sadece kendi şehrindeki sporcuları göster
     else if (req.user.role.name === "Referee") {
@@ -432,6 +419,14 @@ router.get("/get-athletes", auth, async (req, res) => {
       .populate({
         path: "belt",
         select: "name value _id",
+      })
+      .populate({
+        path: "createdBy",
+        select: "name surname role",
+        populate: {
+          path: "role",
+          select: "name"
+        }
       });
 
     console.log("Bulunan sporcu sayısı:", athletes.length);
@@ -467,6 +462,14 @@ router.get("/get-athlete/:id", auth, async (req, res) => {
             select: "name value _id",
           },
         },
+        {
+          path: "createdBy",
+          select: "name surname role",
+          populate: {
+            path: "role",
+            select: "name"
+          }
+        }
       ]);
 
     if (!athlete) {
@@ -581,6 +584,8 @@ router.post("/create-coach", async (req, res) => {
       isCoach: true,
       belt: beltId,
       mobilePhone,
+      createdBy: req.user.id,
+      addedAt: new Date(),
     });
 
     await user.save();
@@ -588,7 +593,7 @@ router.post("/create-coach", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate(["role", "city", "club", "belt", "createdBy"]);
 
     res.status(201).json(userResponse);
   } catch (err) {
@@ -971,6 +976,8 @@ router.post("/create-referee", async (req, res) => {
       isReferee: true,
       belt: beltId,
       mobilePhone,
+      createdBy: req.user.id,
+      addedAt: new Date(),
     });
 
     await user.save();
@@ -978,7 +985,7 @@ router.post("/create-referee", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate(["role", "city", "club", "belt", "createdBy"]);
 
     res.status(201).json(userResponse);
   } catch (err) {
@@ -1262,6 +1269,8 @@ router.post("/create-representetive", async (req, res) => {
       password: hashedPassword,
       isProvincialRepresentative: true,
       mobilePhone,
+      createdBy: req.user.id,
+      addedAt: new Date(),
     });
 
     await user.save();
@@ -1269,7 +1278,7 @@ router.post("/create-representetive", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate(["role", "city", "club", "belt", "createdBy"]);
 
     res.status(201).json(userResponse);
   } catch (err) {
@@ -1568,6 +1577,8 @@ router.post("/create-personel", async (req, res) => {
       password: hashedPassword,
       isStaff: true,
       mobilePhone,
+      createdBy: req.user.id,
+      addedAt: new Date(),
     });
 
     await user.save();
@@ -1575,7 +1586,7 @@ router.post("/create-personel", async (req, res) => {
     // Şifre hariç kullanıcı bilgilerini döndür
     const userResponse = await User.findById(user._id)
       .select("-password")
-      .populate(["role", "city", "club", "belt"]);
+      .populate(["role", "city", "club", "belt", "createdBy"]);
 
     res.status(201).json(userResponse);
   } catch (err) {
@@ -2185,6 +2196,73 @@ router.delete("/:userId/current-belt", auth, async (req, res) => {
       message: "Kemer başarıyla silindi",
       user: updatedUser,
       previousBelt: previousBelt
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
+// Kullanıcının createdBy alanını güncelle (SADECE ADMIN)
+router.put("/update-created-by/:userId", auth, async (req, res) => {
+  try {
+    // Admin kontrolü
+    const adminUser = await User.findById(req.user.id).populate("role");
+    if (adminUser.role.name !== "Admin") {
+      return res.status(403).json({ message: "Bu işlem için yetkiniz yok" });
+    }
+
+    const { userId } = req.params;
+    const { newCreatedByUserId } = req.body;
+
+    if (!newCreatedByUserId) {
+      return res.status(400).json({ message: "Yeni ekleme yapan kullanıcı ID'si gereklidir" });
+    }
+
+    // Güncellenecek kullanıcıyı kontrol et
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    // Yeni createdBy kullanıcısını kontrol et
+    const newCreatedByUser = await User.findById(newCreatedByUserId);
+    if (!newCreatedByUser) {
+      return res.status(404).json({ message: "Belirtilen ekleme yapan kullanıcı bulunamadı" });
+    }
+
+    // Eski createdBy bilgisini kaydet (log için)
+    const oldCreatedBy = targetUser.createdBy;
+
+    // createdBy alanını güncelle
+    targetUser.createdBy = newCreatedByUserId;
+    targetUser.addedAt = new Date(); // İsteğe bağlı: Güncelleme tarihini de değiştir
+
+    await targetUser.save();
+
+    // Güncellenmiş kullanıcıyı döndür
+    const updatedUser = await User.findById(userId)
+      .select("-password")
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "createdBy",
+          select: "name surname role",
+          populate: {
+            path: "role",
+            select: "name"
+          }
+        }
+      ]);
+
+    res.status(200).json({
+      message: "Ekleme yapan kullanıcı bilgisi başarıyla güncellendi",
+      user: updatedUser,
+      oldCreatedBy: oldCreatedBy,
+      newCreatedBy: newCreatedByUserId
     });
   } catch (error) {
     console.error(error);

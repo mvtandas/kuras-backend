@@ -15,6 +15,8 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, index: false },
   password: { type: String, }, // Hashed password
   createdAt: { type: Date, default: Date.now },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Ekleme yapan kullanıcı
+  addedAt: { type: Date, default: Date.now }, // Eklenme tarihi
   identityNumber: { type: String, unique: true },
   nationality: { type: String },
   serialNumber: { type: String },

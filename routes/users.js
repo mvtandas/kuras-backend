@@ -2107,4 +2107,89 @@ router.delete("/:userId/belt-history/:historyId", auth, async (req, res) => {
   }
 });
 
+// Sporcunun mevcut kemerini sil
+router.delete("/:userId/current-belt", auth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Kullanıcı bulunamadı" });
+    }
+
+    // Mevcut kemeri silmeden önce kontrol et
+    if (!user.belt) {
+      return res.status(400).json({ message: "Kullanıcının zaten kemeri bulunmuyor" });
+    }
+
+    // Kullanıcının rolünü kontrol et - sadece sporcu, antrenör ve hakemlerin kemeri olabilir
+    const userWithRole = await User.findById(userId).populate("role");
+    const allowedRoles = ["Athlete", "Coach", "Referee"];
+    
+    if (!allowedRoles.includes(userWithRole.role.name)) {
+      return res.status(400).json({ 
+        message: "Bu kullanıcı türü için kemer bilgisi uygulanmaz" 
+      });
+    }
+
+    // Yetki kontrolü - Admin her kullanıcının kemerini silebilir
+    // Coach/Referee/Representative sadece kendi şehrindeki kullanıcıların kemerini silebilir
+    if (req.user.role.name !== "Admin") {
+      if (
+        req.user.role.name === "Coach" ||
+        req.user.role.name === "Referee" ||
+        req.user.role.name === "Representetive"
+      ) {
+        const cityId = req.user.city._id || req.user.city;
+        const userCityId = user.city._id || user.city;
+        
+        if (cityId.toString() !== userCityId.toString()) {
+          return res.status(403).json({ 
+            message: "Sadece kendi şehrinizdeki kullanıcıların kemerini silebilirsiniz" 
+          });
+        }
+      } else {
+        // Diğer roller sadece kendi kemerlerini silebilir
+        if (userId !== req.user.id) {
+          return res.status(403).json({ 
+            message: "Sadece kendi kemerinizi silebilirsiniz" 
+          });
+        }
+      }
+    }
+
+    // Kemer silme işlemi
+    const previousBelt = user.belt;
+    user.belt = null;
+
+    await user.save();
+
+    // Güncellenmiş kullanıcıyı döndür
+    const updatedUser = await User.findById(userId)
+      .select("-password")
+      .populate([
+        "role",
+        "city",
+        "club",
+        "belt",
+        {
+          path: "beltHistory",
+          populate: {
+            path: "belt",
+            select: "name value _id",
+          },
+        },
+      ]);
+
+    res.status(200).json({
+      message: "Kemer başarıyla silindi",
+      user: updatedUser,
+      previousBelt: previousBelt
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Sunucu hatası" });
+  }
+});
+
 module.exports = router;

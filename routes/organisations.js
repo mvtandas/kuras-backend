@@ -1822,4 +1822,301 @@ function checkBirthDate(birthDate, requirements) {
   return true;
 }
 
+// Organizasyon için turnuva maçlarını getir
+router.get("/:id/tournament-matches", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { weightCategory, gender, status } = req.query;
+    
+    // Organizasyonun var olduğunu kontrol et
+    const organisation = await Organisation.findById(id);
+    if (!organisation) {
+      return res.status(404).json({ message: "Organizasyon bulunamadı" });
+    }
+    
+    // TournamentMatch modelini import et
+    const TournamentMatch = require("../models/tournamentMatch");
+    
+    const filters = { organisationId: id };
+    if (weightCategory) filters.weightCategory = weightCategory;
+    if (gender) filters.gender = gender;
+    if (status) filters.status = status;
+    
+    const tournamentMatches = await TournamentMatch.find(filters)
+      .sort({ createdAt: -1 });
+    
+    // Her turnuva için istatistikleri ekle
+    const matchesWithStats = tournamentMatches.map(match => {
+      const stats = match.getStats();
+      return {
+        ...match.toObject(),
+        stats
+      };
+    });
+    
+    res.json(matchesWithStats);
+  } catch (error) {
+    console.error("Organizasyon turnuva maçları getirme hatası:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Gelen veriyi temizleyen fonksiyon
+function cleanTournamentData(data) {
+  if (data.tournamentType === 'round_robin' && data.rounds) {
+    data.rounds.forEach(round => {
+      round.matches.forEach(match => {
+        // BYE oyuncularını temizle
+        if (match.player1 && (match.player1.name === "BYE" || match.player1.participantId === "bye")) {
+          match.player1 = null;
+        }
+        if (match.player2 && (match.player2.name === "BYE" || match.player2.participantId === "bye")) {
+          match.player2 = null;
+        }
+      });
+    });
+  } else if (data.tournamentType === 'single_elimination' && data.brackets) {
+    data.brackets.forEach(match => {
+      // BYE oyuncularını temizle
+      if (match.player1 && (match.player1.name === "BYE" || match.player1.participantId === "bye")) {
+        match.player1 = null;
+      }
+      if (match.player2 && (match.player2.name === "BYE" || match.player2.participantId === "bye")) {
+        match.player2 = null;
+      }
+    });
+  }
+  return data;
+}
+
+// Round Robin turnuva oluşturma yardımcı fonksiyonu
+function createRoundRobinMatches(participants) {
+  const rounds = [];
+  const n = participants.length;
+  
+  if (n < 2) {
+    return rounds;
+  }
+  
+  // Eğer tek sayıda katılımcı varsa, "bye" ekle
+  const players = [...participants];
+  if (n % 2 === 1) {
+    players.push({ 
+      name: "BYE", 
+      isBye: true,
+      city: "BYE",
+      club: "BYE"
+    });
+  }
+  
+  const numRounds = players.length - 1;
+  const halfSize = players.length / 2;
+  
+  for (let round = 0; round < numRounds; round++) {
+    const roundMatches = [];
+    
+    for (let i = 0; i < halfSize; i++) {
+      const player1Index = i;
+      const player2Index = players.length - 1 - i;
+      
+      // İlk oyuncu sabit, diğerleri döner
+      const player1 = round === 0 ? players[player1Index] : 
+                     round % 2 === 0 ? players[player1Index] : players[player2Index];
+      const player2 = round === 0 ? players[player2Index] : 
+                     round % 2 === 0 ? players[player2Index] : players[player1Index];
+      
+      // BYE maçı oluşturma - BYE olan oyuncuyu null olarak bırak
+      if (player1.isBye && player2.isBye) {
+        continue; // Her iki oyuncu da BYE ise maç oluşturma
+      }
+      
+      const match = {
+        matchId: `round_${round + 1}_match_${i + 1}`,
+        player1: player1.isBye ? null : player1,
+        player2: player2.isBye ? null : player2,
+        status: 'scheduled',
+        winner: null,
+        score: { player1Score: 0, player2Score: 0 },
+        scheduledTime: null,
+        completedAt: null,
+        notes: ''
+      };
+      
+      roundMatches.push(match);
+    }
+    
+    rounds.push({
+      roundNumber: round + 1,
+      matches: roundMatches
+    });
+    
+    // Oyuncuları döndür (Berger tablosu)
+    const lastPlayer = players.pop();
+    players.splice(1, 0, lastPlayer);
+  }
+  
+  return rounds;
+}
+
+// Single Elimination turnuva oluşturma yardımcı fonksiyonu
+function createSingleEliminationBrackets(participants) {
+  const brackets = [];
+  const n = participants.length;
+  
+  if (n < 2) {
+    return brackets;
+  }
+  
+  // Turnuva seviyesini hesapla (2^n >= katılımcı sayısı)
+  const levels = Math.ceil(Math.log2(n));
+  const totalMatches = Math.pow(2, levels - 1);
+  
+  let matchNumber = 1;
+  let roundNumber = 1;
+  
+  // İlk tur maçları
+  for (let i = 0; i < totalMatches; i++) {
+    const player1Index = i;
+    const player2Index = totalMatches * 2 - 1 - i;
+    
+    const player1 = participants[player1Index];
+    const player2 = participants[player2Index];
+    
+    // Eğer her iki oyuncu da yoksa, bu maçı atla
+    if (!player1 && !player2) {
+      continue;
+    }
+    
+    const match = {
+      roundNumber,
+      matchNumber,
+      player1: player1 || null,
+      player2: player2 || null,
+      status: 'scheduled',
+      winner: null,
+      score: { player1Score: 0, player2Score: 0 },
+      scheduledTime: null,
+      completedAt: null,
+      nextMatchNumber: Math.ceil(matchNumber / 2) + totalMatches,
+      nextMatchSlot: matchNumber % 2 === 1 ? 'player1' : 'player2',
+      notes: ''
+    };
+    
+    brackets.push(match);
+    matchNumber++;
+  }
+  
+  // Sonraki turlar için boş maçlar
+  for (let round = 2; round <= levels; round++) {
+    const matchesInRound = Math.pow(2, levels - round);
+    
+    for (let i = 0; i < matchesInRound; i++) {
+      const match = {
+        roundNumber: round,
+        matchNumber: matchNumber,
+        player1: null,
+        player2: null,
+        status: 'scheduled',
+        winner: null,
+        score: { player1Score: 0, player2Score: 0 },
+        scheduledTime: null,
+        completedAt: null,
+        nextMatchNumber: round < levels ? Math.ceil(matchNumber / 2) + totalMatches + Math.pow(2, levels - round - 1) : null,
+        nextMatchSlot: matchNumber % 2 === 1 ? 'player1' : 'player2',
+        notes: ''
+      };
+      
+      brackets.push(match);
+      matchNumber++;
+    }
+  }
+  
+  return brackets;
+}
+
+// Organizasyon için turnuva maçı oluştur
+router.post("/:id/tournament-matches", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).populate("role");
+    
+    // Sadece Admin ve Coach'lar maç oluşturabilir
+    if (!["Admin", "Coach"].includes(user.role.name)) {
+      return res.status(403).json({ message: "Yetkiniz yok" });
+    }
+    
+    const { id } = req.params;
+    const { weightCategory, gender, tournamentType, rounds, brackets, participants } = req.body;
+    
+    // Zorunlu alan kontrolü
+    if (!weightCategory || !gender || !tournamentType) {
+      return res.status(400).json({ message: "Zorunlu alanları doldurun" });
+    }
+    
+    // Organizasyonun var olduğunu kontrol et
+    const organisation = await Organisation.findById(id);
+    if (!organisation) {
+      return res.status(404).json({ message: "Organizasyon bulunamadı" });
+    }
+    
+    // TournamentMatch modelini import et
+    const TournamentMatch = require("../models/tournamentMatch");
+    
+    // Aynı kategori ve cinsiyet için zaten turnuva var mı kontrol et
+    const existingTournament = await TournamentMatch.findOne({
+      organisationId: id,
+      weightCategory,
+      gender
+    });
+    
+    if (existingTournament) {
+      return res.status(400).json({ 
+        message: "Bu kategori ve cinsiyet için zaten bir turnuva mevcut" 
+      });
+    }
+    
+    let tournamentRounds = [];
+    let tournamentBrackets = [];
+    
+    // Eğer katılımcılar verilmişse otomatik maç oluştur
+    if (participants && participants.length > 0) {
+      if (tournamentType === 'round_robin') {
+        tournamentRounds = createRoundRobinMatches(participants);
+      } else if (tournamentType === 'single_elimination') {
+        tournamentBrackets = createSingleEliminationBrackets(participants);
+      }
+    } else {
+      // Manuel olarak verilen maçları kullan ve temizle
+      if (tournamentType === 'round_robin') {
+        tournamentRounds = rounds || [];
+        if (tournamentRounds.length > 0) {
+          const cleanedData = cleanTournamentData({ tournamentType, rounds: tournamentRounds });
+          tournamentRounds = cleanedData.rounds;
+        }
+      } else if (tournamentType === 'single_elimination') {
+        tournamentBrackets = brackets || [];
+        if (tournamentBrackets.length > 0) {
+          const cleanedData = cleanTournamentData({ tournamentType, brackets: tournamentBrackets });
+          tournamentBrackets = cleanedData.brackets;
+        }
+      }
+    }
+    
+    const tournamentMatch = new TournamentMatch({
+      organisationId: id,
+      weightCategory,
+      gender,
+      tournamentType,
+      rounds: tournamentRounds,
+      brackets: tournamentBrackets,
+      status: 'active'
+    });
+    
+    await tournamentMatch.save();
+    res.status(201).json(tournamentMatch);
+  } catch (error) {
+    console.error("Organizasyon turnuva maçı oluşturma hatası:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 module.exports = router;

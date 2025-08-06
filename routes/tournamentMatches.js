@@ -302,10 +302,115 @@ router.get("/", auth, async (req, res) => {
   }
 });
 
+// Single elimination turnuvalarında kazananları ilerletme fonksiyonu
+async function processAdvancement(tournamentMatch) {
+  if (tournamentMatch.tournamentType !== 'single_elimination') {
+    return tournamentMatch;
+  }
+  
+  let hasChanges = false;
+  
+  // Brackets'i roundNumber'a göre sırala
+  const sortedBrackets = tournamentMatch.brackets.sort((a, b) => a.roundNumber - b.roundNumber);
+  
+  // Round'ları grupla
+  const roundGroups = {};
+  sortedBrackets.forEach(bracket => {
+    if (!roundGroups[bracket.roundNumber]) {
+      roundGroups[bracket.roundNumber] = [];
+    }
+    roundGroups[bracket.roundNumber].push(bracket);
+  });
+  
+  // Her round için kontrol et
+  for (const roundNumber of Object.keys(roundGroups).sort((a, b) => a - b)) {
+    const roundMatches = roundGroups[roundNumber];
+    
+    // Bu round'daki gerçek maçları (her iki oyuncusu da olan) kontrol et
+    const realMatches = roundMatches.filter(match => 
+      match.player1 && match.player2
+    );
+    
+    // Bu round'daki bye maçları kontrol et
+    const byeMatches = roundMatches.filter(match => 
+      (match.player1 && !match.player2) || (!match.player1 && match.player2)
+    );
+    
+    // Bu round'daki tüm gerçek maçların tamamlanıp tamamlanmadığını kontrol et
+    const allRealMatchesCompleted = realMatches.every(match => 
+      match.status === 'completed'
+    );
+    
+    // Eğer bu round'daki tüm gerçek maçlar tamamlandıysa, bye maçları da tamamla
+    if (realMatches.length > 0 && allRealMatchesCompleted && byeMatches.length > 0) {
+      for (let byeMatch of byeMatches) {
+        if (byeMatch.status !== 'completed') {
+          const winner = byeMatch.player1 || byeMatch.player2;
+          const winnerSlot = byeMatch.player1 ? 'player1' : 'player2';
+          
+          // Bye maçını tamamla
+          byeMatch.status = 'completed';
+          byeMatch.winner = winnerSlot;
+          byeMatch.completedAt = new Date();
+          byeMatch.notes = 'Otomatik geçiş - Round tamamlandı';
+          hasChanges = true;
+          
+          // Kazananı bir sonraki tura ilerlet
+          if (byeMatch.nextMatchNumber) {
+            const nextMatch = sortedBrackets.find(b => b.matchNumber === byeMatch.nextMatchNumber);
+            if (nextMatch) {
+              if (byeMatch.nextMatchSlot === 'player1') {
+                nextMatch.player1 = winner;
+              } else if (byeMatch.nextMatchSlot === 'player2') {
+                nextMatch.player2 = winner;
+              }
+              hasChanges = true;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Normal kazanan ilerletme işlemleri
+  for (let bracket of sortedBrackets) {
+    // Normal maç kazananı kontrolü
+    if (bracket.status === 'completed' && bracket.winner && bracket.nextMatchNumber) {
+      const winner = bracket.winner === 'player1' ? bracket.player1 : bracket.player2;
+      
+      if (winner) {
+        const nextMatch = sortedBrackets.find(b => b.matchNumber === bracket.nextMatchNumber);
+        if (nextMatch) {
+          // Kazananın zaten yerleştirilip yerleştirilmediğini kontrol et
+          const isAlreadyPlaced = (bracket.nextMatchSlot === 'player1' && nextMatch.player1?.participantId === winner.participantId) ||
+                                 (bracket.nextMatchSlot === 'player2' && nextMatch.player2?.participantId === winner.participantId);
+          
+          if (!isAlreadyPlaced) {
+            if (bracket.nextMatchSlot === 'player1') {
+              nextMatch.player1 = winner;
+            } else if (bracket.nextMatchSlot === 'player2') {
+              nextMatch.player2 = winner;
+            }
+            hasChanges = true;
+          }
+        }
+      }
+    }
+  }
+  
+  // Değişiklikler varsa kaydet
+  if (hasChanges) {
+    tournamentMatch.brackets = sortedBrackets;
+    await tournamentMatch.save();
+  }
+  
+  return tournamentMatch;
+}
+
 // Belirli bir turnuva maçını getir
 router.get("/:id", auth, async (req, res) => {
   try {
-    const tournamentMatch = await TournamentMatch.findById(req.params.id)
+    let tournamentMatch = await TournamentMatch.findById(req.params.id)
       .populate({
         path: 'organisationId',
         select: 'tournamentName tournamentDate tournamentPlace'
@@ -314,6 +419,9 @@ router.get("/:id", auth, async (req, res) => {
     if (!tournamentMatch) {
       return res.status(404).json({ message: "Turnuva maçı bulunamadı" });
     }
+
+    // Single elimination turnuvalarında kazananları ilerlet
+    tournamentMatch = await processAdvancement(tournamentMatch);
 
     // İstatistikleri ekle
     const stats = tournamentMatch.getStats();
@@ -467,6 +575,89 @@ router.patch("/:id/matches/:matchId", auth, async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error("Maç güncelleme hatası:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Bye maçını manuel olarak tamamla
+router.post("/:id/matches/:matchId/process-bye", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).populate("role");
+    
+    // Sadece Admin ve Coach'lar bye işleyebilir
+    if (!["Admin", "Coach"].includes(user.role.name)) {
+      return res.status(403).json({ message: "Yetkiniz yok" });
+    }
+
+    const { id, matchId } = req.params;
+
+    const tournamentMatch = await TournamentMatch.findById(id);
+    
+    if (!tournamentMatch) {
+      return res.status(404).json({ message: "Turnuva maçı bulunamadı" });
+    }
+
+    if (tournamentMatch.tournamentType !== 'single_elimination') {
+      return res.status(400).json({ message: "Bu işlem sadece single elimination turnuvalar için geçerlidir" });
+    }
+
+    // Maçı bul
+    const match = tournamentMatch.brackets.find(m => m.matchNumber === parseInt(matchId));
+    
+    if (!match) {
+      return res.status(404).json({ message: "Maç bulunamadı" });
+    }
+
+    // Bye durumu kontrol et
+    const isByeMatch = (match.player1 && !match.player2) || (!match.player1 && match.player2);
+    
+    if (!isByeMatch) {
+      return res.status(400).json({ message: "Bu maç bye durumunda değil" });
+    }
+
+    if (match.status === 'completed') {
+      return res.status(400).json({ message: "Bu maç zaten tamamlanmış" });
+    }
+
+    // Bye maçını tamamla
+    const winner = match.player1 || match.player2;
+    const winnerSlot = match.player1 ? 'player1' : 'player2';
+    
+    match.status = 'completed';
+    match.winner = winnerSlot;
+    match.completedAt = new Date();
+    match.notes = 'Manuel Bye İşlemi';
+
+    // Kazananı bir sonraki tura ilerlet
+    if (match.nextMatchNumber) {
+      const nextMatch = tournamentMatch.brackets.find(b => b.matchNumber === match.nextMatchNumber);
+      if (nextMatch) {
+        if (match.nextMatchSlot === 'player1') {
+          nextMatch.player1 = winner;
+        } else if (match.nextMatchSlot === 'player2') {
+          nextMatch.player2 = winner;
+        }
+      }
+    }
+
+    await tournamentMatch.save();
+    
+    // Güncellenmiş turnuvayı döndür
+    const updatedMatch = await TournamentMatch.findById(id)
+      .populate({
+        path: 'organisationId',
+        select: 'tournamentName tournamentDate tournamentPlace'
+      });
+
+    const stats = updatedMatch.getStats();
+    const result = {
+      ...updatedMatch.toObject(),
+      stats
+    };
+
+    res.json(result);
+  } catch (error) {
+    console.error("Bye maç işleme hatası:", error);
     res.status(500).json({ message: error.message });
   }
 });

@@ -65,6 +65,7 @@ const UserSchema = new mongoose.Schema({
   losses: { type: Number, default: 0 },
   success: { type: String },
   weight: { type: Number },
+  profileImage: { type: String }, // Profil resmi URL'i veya base64 string
   belt: { type: mongoose.Schema.Types.ObjectId, ref: "Belt" },
   beltHistory: [
     {

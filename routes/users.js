@@ -29,6 +29,7 @@ router.post("/create-athlete", auth, async (req, res) => {
     belt,
     weight,
     mobilePhone,
+    profileImage,
   } = req.body;
 
   // Tüm gerekli alanların kontrolü
@@ -119,6 +120,7 @@ router.post("/create-athlete", auth, async (req, res) => {
       identityNumber,
       isAthlete: true,
       weight,
+      profileImage,
       mobilePhone,
       createdBy: req.user.id,
       addedAt: new Date(),
@@ -152,7 +154,7 @@ router.post("/create-athlete", auth, async (req, res) => {
   }
 });
 
-router.post("/update-athlete/:id", async (req, res) => {
+router.put("/update-athlete/:id", async (req, res) => {
   const {
     name,
     surname,
@@ -191,6 +193,7 @@ router.post("/update-athlete/:id", async (req, res) => {
     athleteAchievements,
     belt,
     weight,
+    profileImage,
   } = req.body;
 
   try {
@@ -264,6 +267,7 @@ router.post("/update-athlete/:id", async (req, res) => {
       updateFields.athleteAchievements = athleteAchievements;
     if (beltId) updateFields.belt = beltId;
     if (weight !== undefined) updateFields.weight = weight;
+    if (profileImage !== undefined) updateFields.profileImage = profileImage;
 
     // Verilen alanları güncelle
     Object.assign(athlete, updateFields);
@@ -278,7 +282,7 @@ router.post("/update-athlete/:id", async (req, res) => {
   }
 });
 
-router.post("/delete-athlete/:id", async (req, res) => {
+router.delete("/delete-athlete/:id", async (req, res) => {
   try {
     const athlete = await User.findByIdAndDelete(req.params.id);
     if (!athlete) {
@@ -601,7 +605,7 @@ router.post("/create-coach", async (req, res) => {
   }
 });
 
-router.post("/update-coach/:id", async (req, res) => {
+router.put("/update-coach/:id", async (req, res) => {
   const {
     name,
     surname,
@@ -758,7 +762,7 @@ router.post("/update-coach/:id", async (req, res) => {
   }
 });
 
-router.post("/delete-coach/:id", async (req, res) => {
+router.delete("/delete-coach/:id", async (req, res) => {
   try {
     const coach = await User.findByIdAndDelete(req.params.id);
     if (!coach) {
@@ -993,7 +997,7 @@ router.post("/create-referee", async (req, res) => {
   }
 });
 
-router.post("/update-referee/:id", async (req, res) => {
+router.put("/update-referee/:id", async (req, res) => {
   const {
     name,
     surname,
@@ -1129,7 +1133,7 @@ router.post("/update-referee/:id", async (req, res) => {
   }
 });
 
-router.post("/delete-referee/:id", async (req, res) => {
+router.delete("/delete-referee/:id", async (req, res) => {
   try {
     const referee = await User.findByIdAndDelete(req.params.id);
     if (!referee) {
@@ -1286,7 +1290,7 @@ router.post("/create-representetive", async (req, res) => {
   }
 });
 
-router.post("/update-representetive/:id", async (req, res) => {
+router.put("/update-representetive/:id", async (req, res) => {
   const {
     name,
     surname,
@@ -1417,7 +1421,7 @@ router.post("/update-representetive/:id", async (req, res) => {
   }
 });
 
-router.post("/delete-representetive/:id", async (req, res) => {
+router.delete("/delete-representetive/:id", async (req, res) => {
   try {
     const representetive = await User.findByIdAndDelete(req.params.id);
     if (!representetive) {
@@ -1594,7 +1598,7 @@ router.post("/create-personel", async (req, res) => {
   }
 });
 
-router.post("/update-personel/:id", async (req, res) => {
+router.put("/update-personel/:id", async (req, res) => {
   const {
     name,
     surname,
@@ -1680,7 +1684,7 @@ router.post("/update-personel/:id", async (req, res) => {
   }
 });
 
-router.post("/delete-personel/:id", async (req, res) => {
+router.delete("/delete-personel/:id", async (req, res) => {
   try {
     const personel = await User.findByIdAndDelete(req.params.id);
     if (!personel) {

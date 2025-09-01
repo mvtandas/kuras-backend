@@ -36,6 +36,13 @@ const OrganisationSchema = new mongoose.Schema({
     addedAt: { type: Date, default: Date.now }
   }],
 
+  // Eşleşme Tipi
+  matchType: {
+    type: String,
+    enum: ['single', 'double'],
+    default: 'single'
+  },
+
   // Durum Bilgisi
   status: { 
     type: String, 

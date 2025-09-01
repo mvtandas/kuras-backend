@@ -21,7 +21,7 @@ router.post("/", auth, async (req, res) => {
       return res.status(403).json({ message: "Yetkiniz yok" });
     }
 
-    const { tournamentName, tournamentPlace, tournamentDate, birthDateRequirements, beltRequirement } = req.body;
+    const { tournamentName, tournamentPlace, tournamentDate, birthDateRequirements, beltRequirement, matchType } = req.body;
 
     // Zorunlu alan kontrolü
     if (!tournamentPlace || !tournamentDate?.startDate ) {
@@ -34,6 +34,7 @@ router.post("/", auth, async (req, res) => {
       tournamentDate,
       birthDateRequirements,
       beltRequirement: beltRequirement || [],
+      matchType: matchType || 'single', // Varsayılan olarak single
     });
 
     await organisation.save();
@@ -272,6 +273,11 @@ router.put("/:id", auth, async (req, res) => {
     // beltRequirement bir dizi olarak gönderilirse, ilk elemanını al
     if (updates.beltRequirement && Array.isArray(updates.beltRequirement)) {
       updates.beltRequirement = updates.beltRequirement[0] || null;
+    }
+
+    // matchType doğrulama
+    if (updates.matchType && !['single', 'double'].includes(updates.matchType)) {
+      return res.status(400).json({ message: "matchType sadece 'single' veya 'double' olabilir" });
     }
 
     // Organizasyonu bul ve güncelle
@@ -1875,7 +1881,7 @@ function cleanTournamentData(data) {
         }
       });
     });
-  } else if (data.tournamentType === 'single_elimination' && data.brackets) {
+  } else if ((data.tournamentType === 'single_elimination' || data.tournamentType === 'double_elimination') && data.brackets) {
     data.brackets.forEach(match => {
       // BYE oyuncularını temizle
       if (match.player1 && (match.player1.name === "BYE" || match.player1.participantId === "bye")) {
@@ -1885,6 +1891,18 @@ function cleanTournamentData(data) {
         match.player2 = null;
       }
     });
+    
+    // Double elimination için loser brackets da temizle
+    if (data.tournamentType === 'double_elimination' && data.loserBrackets) {
+      data.loserBrackets.forEach(match => {
+        if (match.player1 && (match.player1.name === "BYE" || match.player1.participantId === "bye")) {
+          match.player1 = null;
+        }
+        if (match.player2 && (match.player2.name === "BYE" || match.player2.participantId === "bye")) {
+          match.player2 = null;
+        }
+      });
+    }
   }
   return data;
 }
@@ -2034,6 +2052,106 @@ function createSingleEliminationBrackets(participants) {
   return brackets;
 }
 
+// Double Elimination turnuva oluşturma yardımcı fonksiyonu
+function createDoubleEliminationBrackets(participants) {
+  const winnerBrackets = [];
+  const loserBrackets = [];
+  const n = participants.length;
+  
+  if (n < 2) {
+    return { winnerBrackets, loserBrackets };
+  }
+  
+  // Ana bracket (winner bracket) - single elimination gibi başlar
+  const levels = Math.ceil(Math.log2(n));
+  const totalMatches = Math.pow(2, levels - 1);
+  
+  let matchNumber = 1;
+  let roundNumber = 1;
+  
+  // İlk tur maçları (winner bracket)
+  for (let i = 0; i < totalMatches; i++) {
+    const player1Index = i;
+    const player2Index = totalMatches * 2 - 1 - i;
+    
+    const player1 = participants[player1Index];
+    const player2 = participants[player2Index];
+    
+    if (!player1 && !player2) {
+      continue;
+    }
+    
+    const match = {
+      roundNumber,
+      matchNumber,
+      player1: player1 || null,
+      player2: player2 || null,
+      status: 'scheduled',
+      winner: null,
+      score: { player1Score: 0, player2Score: 0 },
+      scheduledTime: null,
+      completedAt: null,
+      nextMatchNumber: Math.ceil(matchNumber / 2) + totalMatches,
+      nextMatchSlot: matchNumber % 2 === 1 ? 'player1' : 'player2',
+      loserNextMatchNumber: matchNumber, // Kaybeden loser bracket'e gider
+      notes: ''
+    };
+    
+    winnerBrackets.push(match);
+    matchNumber++;
+  }
+  
+  // Winner bracket'in sonraki turları
+  for (let round = 2; round <= levels; round++) {
+    const matchesInRound = Math.pow(2, levels - round);
+    
+    for (let i = 0; i < matchesInRound; i++) {
+      const match = {
+        roundNumber: round,
+        matchNumber: matchNumber,
+        player1: null,
+        player2: null,
+        status: 'scheduled',
+        winner: null,
+        score: { player1Score: 0, player2Score: 0 },
+        scheduledTime: null,
+        completedAt: null,
+        nextMatchNumber: round < levels ? Math.ceil(matchNumber / 2) + totalMatches + Math.pow(2, levels - round - 1) : null,
+        nextMatchSlot: matchNumber % 2 === 1 ? 'player1' : 'player2',
+        loserNextMatchNumber: matchNumber + 1000, // Loser bracket için offset
+        notes: ''
+      };
+      
+      winnerBrackets.push(match);
+      matchNumber++;
+    }
+  }
+  
+  // Loser bracket oluştur - basit versiyon
+  let loserMatchNumber = 1000; // Loser bracket için farklı numaralar
+  for (let i = 0; i < Math.floor(n/2); i++) {
+    const match = {
+      roundNumber: 1,
+      matchNumber: loserMatchNumber,
+      player1: null,
+      player2: null,
+      status: 'scheduled',
+      winner: null,
+      score: { player1Score: 0, player2Score: 0 },
+      scheduledTime: null,
+      completedAt: null,
+      nextMatchNumber: loserMatchNumber + 1,
+      nextMatchSlot: 'player1',
+      notes: ''
+    };
+    
+    loserBrackets.push(match);
+    loserMatchNumber++;
+  }
+  
+  return { winnerBrackets, loserBrackets };
+}
+
 // Organizasyon için turnuva maçı oluştur
 router.post("/:id/tournament-matches", auth, async (req, res) => {
   try {
@@ -2046,6 +2164,14 @@ router.post("/:id/tournament-matches", auth, async (req, res) => {
     
     const { id } = req.params;
     const { weightCategory, gender, tournamentType, rounds, brackets, participants } = req.body;
+    
+    // Debug: gelen veriyi kontrol et
+    console.log('Tournament match creation - received data:', {
+      tournamentType,
+      bracketCount: brackets ? brackets.length : 0,
+      loserBracketCount: req.body.loserBrackets ? req.body.loserBrackets.length : 0,
+      hasParticipants: participants && participants.length > 0
+    });
     
     // Zorunlu alan kontrolü
     if (!weightCategory || !gender || !tournamentType) {
@@ -2076,6 +2202,7 @@ router.post("/:id/tournament-matches", auth, async (req, res) => {
     
     let tournamentRounds = [];
     let tournamentBrackets = [];
+    let tournamentLoserBrackets = [];
     
     // Eğer katılımcılar verilmişse otomatik maç oluştur
     if (participants && participants.length > 0) {
@@ -2083,6 +2210,10 @@ router.post("/:id/tournament-matches", auth, async (req, res) => {
         tournamentRounds = createRoundRobinMatches(participants);
       } else if (tournamentType === 'single_elimination') {
         tournamentBrackets = createSingleEliminationBrackets(participants);
+      } else if (tournamentType === 'double_elimination') {
+        const doubleElimResult = createDoubleEliminationBrackets(participants);
+        tournamentBrackets = doubleElimResult.winnerBrackets;
+        tournamentLoserBrackets = doubleElimResult.loserBrackets;
       }
     } else {
       // Manuel olarak verilen maçları kullan ve temizle
@@ -2098,8 +2229,30 @@ router.post("/:id/tournament-matches", auth, async (req, res) => {
           const cleanedData = cleanTournamentData({ tournamentType, brackets: tournamentBrackets });
           tournamentBrackets = cleanedData.brackets;
         }
+      } else if (tournamentType === 'double_elimination') {
+        // Double elimination için manuel bracket verileri
+        tournamentBrackets = brackets || [];
+        tournamentLoserBrackets = req.body.loserBrackets || [];
+        
+        if (tournamentBrackets.length > 0 || tournamentLoserBrackets.length > 0) {
+          const cleanedData = cleanTournamentData({ 
+            tournamentType, 
+            brackets: tournamentBrackets,
+            loserBrackets: tournamentLoserBrackets 
+          });
+          tournamentBrackets = cleanedData.brackets || [];
+          tournamentLoserBrackets = cleanedData.loserBrackets || [];
+        }
       }
     }
+    
+    // Debug: ne kaydedilecek kontrol et
+    console.log('Tournament match creation - saving data:', {
+      tournamentType,
+      roundsCount: tournamentRounds.length,
+      bracketsCount: tournamentBrackets.length,
+      loserBracketsCount: tournamentLoserBrackets.length
+    });
     
     const tournamentMatch = new TournamentMatch({
       organisationId: id,
@@ -2108,6 +2261,7 @@ router.post("/:id/tournament-matches", auth, async (req, res) => {
       tournamentType,
       rounds: tournamentRounds,
       brackets: tournamentBrackets,
+      loserBrackets: tournamentLoserBrackets,
       status: 'active'
     });
     

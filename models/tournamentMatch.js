@@ -189,7 +189,7 @@ const tournamentMatchSchema = new mongoose.Schema({
   },
   tournamentType: {
     type: String,
-    enum: ['round_robin', 'single_elimination'],
+    enum: ['round_robin', 'single_elimination', 'double_elimination'],
     required: true
   },
   status: {
@@ -199,6 +199,7 @@ const tournamentMatchSchema = new mongoose.Schema({
   },
   rounds: [roundSchema],
   brackets: [bracketSchema],
+  loserBrackets: [bracketSchema], // Double elimination için kaybedenler kategorisi
   createdAt: {
     type: Date,
     default: Date.now
@@ -221,8 +222,30 @@ tournamentMatchSchema.methods.getStats = function() {
     totalMatches: 0,
     completedMatches: 0,
     pendingMatches: 0,
-    winners: []
+    winners: [],
+    winnersUnique: [],
+    winnersDetailed: [],
+    byeWins: 0
   };
+  const uniqueWinnerIds = new Set();
+  
+  function collectWin(match, bracketLabel) {
+    const isByeWin = (match.player1 && !match.player2) || (!match.player1 && match.player2);
+    if (isByeWin) stats.byeWins++;
+    if (match.winner) {
+      const winnerPlayer = match[match.winner];
+      if (winnerPlayer) {
+        stats.winners.push(winnerPlayer);
+        stats.winnersDetailed.push({
+          participantId: winnerPlayer.participantId || null,
+          name: winnerPlayer.name || '',
+          bracket: bracketLabel,
+          isByeWin
+        });
+        if (winnerPlayer.participantId) uniqueWinnerIds.add(String(winnerPlayer.participantId));
+      }
+    }
+  }
   
   if (this.tournamentType === 'round_robin') {
     this.rounds.forEach(round => {
@@ -230,28 +253,39 @@ tournamentMatchSchema.methods.getStats = function() {
         stats.totalMatches++;
         if (match.status === 'completed') {
           stats.completedMatches++;
-          if (match.winner) {
-            stats.winners.push(match[match.winner]);
-          }
+          collectWin(match, 'round_robin');
         } else {
           stats.pendingMatches++;
         }
       });
     });
   } else {
+    // Ana bracket için
     this.brackets.forEach(match => {
       stats.totalMatches++;
       if (match.status === 'completed') {
         stats.completedMatches++;
-        if (match.winner) {
-          stats.winners.push(match[match.winner]);
-        }
+        collectWin(match, 'main');
       } else {
         stats.pendingMatches++;
       }
     });
+    
+    // Double elimination için loser bracket
+    if (this.tournamentType === 'double_elimination' && this.loserBrackets) {
+      this.loserBrackets.forEach(match => {
+        stats.totalMatches++;
+        if (match.status === 'completed') {
+          stats.completedMatches++;
+          collectWin(match, 'repechage');
+        } else {
+          stats.pendingMatches++;
+        }
+      });
+    }
   }
   
+  stats.winnersUnique = Array.from(uniqueWinnerIds);
   return stats;
 };
 

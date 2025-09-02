@@ -2178,19 +2178,37 @@ function fixTournamentFinals(tournamentMatch) {
   const maxRound = Math.max(...wb.map(m => m.roundNumber || 0));
   let changed = false;
   
+  console.log(`\n=== FINAL MAÇLARINI DÜZELT ===`);
+  console.log(`Maksimum round: ${maxRound}`);
+  
   // Sadece en yüksek round'daki ve nextMatchNumber'ı olmayan maç final olmalı
   for (const match of wb) {
     if (match.roundNumber === maxRound && match.nextMatchNumber) {
       // Bu maç final olmamalı, nextMatchNumber'ı temizle
+      console.log(`❌ Maç ${match.matchNumber} yanlış final: nextMatchNumber = ${match.nextMatchNumber}`);
       match.nextMatchNumber = null;
       match.nextMatchSlot = null;
       changed = true;
-      console.log(`Turnuva düzeltildi: Maç ${match.matchNumber} artık final değil`);
+      console.log(`✅ Maç ${match.matchNumber} düzeltildi: artık final değil`);
+    }
+  }
+  
+  // Yarı final maçlarını da kontrol et (final'den bir önceki round)
+  const semiRound = maxRound - 1;
+  for (const match of wb) {
+    if (match.roundNumber === semiRound && match.nextMatchNumber) {
+      console.log(`❌ Maç ${match.matchNumber} yanlış yarı final: nextMatchNumber = ${match.nextMatchNumber}`);
+      match.nextMatchNumber = null;
+      match.nextMatchSlot = null;
+      changed = true;
+      console.log(`✅ Maç ${match.matchNumber} düzeltildi: yarı final`);
     }
   }
   
   if (changed) {
-    console.log('Turnuva final maçları düzeltildi');
+    console.log('✅ Turnuva final maçları düzeltildi');
+  } else {
+    console.log('✅ Turnuva final maçları zaten doğru');
   }
   
   return tournamentMatch;

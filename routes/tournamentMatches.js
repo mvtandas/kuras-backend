@@ -2201,13 +2201,15 @@ function buildIJFRepechage(wb) {
   if (!wb?.length) return [];
   
   const maxRound = Math.max(...wb.map(m => m.roundNumber || 0));
+  console.log(`\n=== IJF REPECHAGE DEBUG ===`);
+  console.log(`Maksimum round: ${maxRound}`);
   
   // Yarı finalleri bul (final'den bir önceki round)
   const semis = wb
     .filter(m => m.roundNumber === maxRound - 1 && m.player1 && m.player2)
     .sort((a, b) => a.matchNumber - b.matchNumber);
   
-  console.log(`IJF Repechage: ${semis.length} yarı final bulundu`);
+  console.log(`Yarı final sayısı: ${semis.length}`);
   console.log('Yarı finaller:', semis.map(s => `Maç ${s.matchNumber}: ${s.player1.name} vs ${s.player2.name}`));
   
   if (semis.length < 2) {
@@ -2221,6 +2223,7 @@ function buildIJFRepechage(wb) {
   const semiAFinalists = [semiA.player1, semiA.player2].filter(Boolean);
   const semiBFinalists = [semiB.player1, semiB.player2].filter(Boolean);
   
+  console.log('\n--- Yarı Finalistler ---');
   console.log('Yarı A finalistleri:', semiAFinalists.map(p => p.name));
   console.log('Yarı B finalistleri:', semiBFinalists.map(p => p.name));
   
@@ -2231,7 +2234,7 @@ function buildIJFRepechage(wb) {
     for (const finalist of semiFinalists) {
       if (!finalist?.participantId) continue;
       
-      console.log(`${poolName}: ${finalist.name}'e kaybedenleri arıyorum...`);
+      console.log(`\n${poolName}: ${finalist.name}'e kaybedenleri arıyorum...`);
       
       // Bu finalist'in kazandığı tüm maçlardaki kaybedenleri bul
       for (const match of wb) {
@@ -2241,7 +2244,7 @@ function buildIJFRepechage(wb) {
         if (winner?.participantId === finalist.participantId) {
           const loser = getLoser(match);
           if (loser?.participantId) {
-            console.log(`  - Maç ${match.matchNumber}: ${loser.name} (Round ${match.roundNumber})`);
+            console.log(`  ✓ Maç ${match.matchNumber}: ${loser.name} (Round ${match.roundNumber})`);
             losers.push({
               player: loser,
               fromMatch: match.matchNumber,
@@ -2263,7 +2266,11 @@ function buildIJFRepechage(wb) {
       return a.fromMatch - b.fromMatch;
     });
     
-    console.log(`${poolName} sıralanmış liste:`, sorted.map(p => `${p.player.name} (Round ${p.roundNumber})`));
+    console.log(`\n${poolName} final sıralanmış liste (${sorted.length} oyuncu):`);
+    sorted.forEach((item, index) => {
+      console.log(`  ${index + 1}. ${item.player.name} (Round ${item.roundNumber}, Maç ${item.fromMatch})`);
+    });
+    
     return sorted;
   };
   
@@ -2271,19 +2278,24 @@ function buildIJFRepechage(wb) {
   const poolA = getLosersToSemiFinalists(semiAFinalists, 'Pool A');
   const poolB = getLosersToSemiFinalists(semiBFinalists, 'Pool B');
   
+  console.log(`\n--- Toplam Repechage Oyuncuları ---`);
+  console.log(`Pool A: ${poolA.length} oyuncu`);
+  console.log(`Pool B: ${poolB.length} oyuncu`);
+  console.log(`Toplam: ${poolA.length + poolB.length} oyuncu`);
+  
   // Şimdi repechage maçlarını oluştur
   const repechageMatches = [];
   
   // Pool A için repechage şeridi
   if (poolA.length > 0) {
-    console.log(`Pool A repechage şeridi oluşturuluyor: ${poolA.length} oyuncu`);
+    console.log(`\nPool A repechage şeridi oluşturuluyor: ${poolA.length} oyuncu`);
     const laneAMatches = createRepechageLane(1000, poolA.map(p => p.player));
     repechageMatches.push(...laneAMatches);
   }
   
   // Pool B için repechage şeridi
   if (poolB.length > 0) {
-    console.log(`Pool B repechage şeridi oluşturuluyor: ${poolB.length} oyuncu`);
+    console.log(`\nPool B repechage şeridi oluşturuluyor: ${poolB.length} oyuncu`);
     const laneBMatches = createRepechageLane(1100, poolB.map(p => p.player));
     repechageMatches.push(...laneBMatches);
   }
@@ -2291,6 +2303,10 @@ function buildIJFRepechage(wb) {
   // Bronz maçlarını ekle
   const semiALoser = getLoser(semiA);
   const semiBLoser = getLoser(semiB);
+  
+  console.log(`\n--- Bronz Maçları ---`);
+  console.log(`Bronz A: Repechage A kazananı vs ${semiALoser?.name || 'Bilinmiyor'}`);
+  console.log(`Bronz B: Repechage B kazananı vs ${semiBLoser?.name || 'Bilinmiyor'}`);
   
   const bronzeA = {
     roundNumber: 99,
@@ -2324,7 +2340,8 @@ function buildIJFRepechage(wb) {
   
   repechageMatches.push(bronzeA, bronzeB);
   
-  console.log(`IJF Repechage tamamlandı: ${repechageMatches.length} toplam maç`);
+  console.log(`\n=== IJF REPECHAGE TAMAMLANDI ===`);
+  console.log(`Toplam maç sayısı: ${repechageMatches.length}`);
   return repechageMatches;
 }
 

@@ -397,31 +397,35 @@ async function ensureStateOnRead(tournamentMatch, { forceRebuild = true } = {}) 
       changed = true;
     }
 
-    if (forceRebuild && tournamentMatch.tournamentType === 'double_elimination') {
-      const lb = tournamentMatch.loserBrackets || [];
-      const hasCompletedLB = lb.some(m => m.status === 'completed');
-      if (!hasCompletedLB && lb.length) {
-        tournamentMatch.loserBrackets = [];
-        changed = true;
-      }
-    }
-
-    tournamentMatch = await processAdvancement(tournamentMatch);
-
+    // IJF Repechage sistemi - her okumada otomatik uygula
     if (tournamentMatch.tournamentType === 'double_elimination') {
-      // Kayıtlı LB'yi, WB'den türetilen doğru yapıyla uzlaştır
-      const { lb, changed: lbChanged } = maintainLoserBrackets(tournamentMatch.brackets || [], tournamentMatch.loserBrackets || []);
-      if (lbChanged) {
-        tournamentMatch.loserBrackets = lb;
+      console.log('IJF Repechage sistemi otomatik uygulanıyor...');
+      
+      // Mevcut loser bracket'ı IJF sistemi ile karşılaştır
+      const { lb: ijfRepechage, changed: repechageChanged, reason } = maintainLoserBrackets(
+        tournamentMatch.brackets || [], 
+        tournamentMatch.loserBrackets || []
+      );
+      
+      if (repechageChanged) {
+        console.log(`IJF Repechage güncellendi: ${reason}`);
+        tournamentMatch.loserBrackets = ijfRepechage;
         changed = true;
       } else {
-        // yine de referans objede güncel LB ile devam edelim
-        tournamentMatch.loserBrackets = lb;
+        console.log('IJF Repechage güncel, değişiklik yok');
       }
     }
 
-    if (changed) await tournamentMatch.save();
+    // Winner bracket advancement'ı işle
+    tournamentMatch = await processAdvancement(tournamentMatch);
 
+    // Eğer değişiklik varsa kaydet
+    if (changed) {
+      console.log('Turnuva IJF sistemi ile güncellendi, kaydediliyor...');
+      await tournamentMatch.save();
+    }
+
+    // Fresh data al ve display number'ları ekle
     const fresh = await TournamentMatch.findById(tournamentMatch._id).populate({
       path: 'organisationId',
       select: 'tournamentName tournamentDate tournamentPlace'
@@ -429,27 +433,34 @@ async function ensureStateOnRead(tournamentMatch, { forceRebuild = true } = {}) 
 
     const stats = fresh.getStats();
     const baseObj = fresh.toObject();
-    // LoserBrackets için graph-temelli displayNumber ataması
+    
+    // LoserBrackets için display number ataması
     if (Array.isArray(baseObj.loserBrackets) && baseObj.loserBrackets.length) {
       const losersClone = baseObj.loserBrackets.map(m => ({ ...m }));
-      // winner finalini bul ve winner-final-hariç sayısı kadar offset ver
+      // Winner bracket final hariç sayısı kadar offset ver
       const wb = baseObj.brackets || [];
       const wbMaxRound = wb.reduce((m,x)=>Math.max(m, x.roundNumber||0), 0);
       const wbFinal = wb.find(m => (m.roundNumber === wbMaxRound) && !m.nextMatchNumber);
       const wbCountWithoutFinal = wb.filter(m => !wbFinal || m.matchNumber !== wbFinal.matchNumber).length;
       const baseStart = wbCountWithoutFinal + 1;
       renumberLosers(losersClone, baseStart);
-      // displayNumber'ları geri yaz
+      
+      // Display number'ları geri yaz
       const dispByNum = Object.fromEntries(losersClone.map(m => [m.matchNumber, m.displayNumber]));
-      baseObj.loserBrackets = baseObj.loserBrackets.map(m => ({ ...m, displayNumber: dispByNum[m.matchNumber] ?? m.displayNumber }));
+      baseObj.loserBrackets = baseObj.loserBrackets.map(m => ({ 
+        ...m, 
+        displayNumber: dispByNum[m.matchNumber] ?? m.displayNumber 
+      }));
     }
+    
     const withDisplay = attachDisplayNumbers(baseObj);
-    return { body: { ...withDisplay, stats }, fresh };
-  } catch (err) {
-    console.error('ensureStateOnRead hatası:', err);
+    return { body: { ...withDisplay, stats }, fresh, changed };
+    
+  } catch (error) {
+    console.error('ensureStateOnRead hatası:', error);
     const stats = tournamentMatch.getStats();
     const withDisplay = attachDisplayNumbers(tournamentMatch.toObject());
-    return { body: { ...withDisplay, stats }, fresh: tournamentMatch };
+    return { body: { ...withDisplay, stats }, fresh: tournamentMatch, changed: false };
   }
 }
 

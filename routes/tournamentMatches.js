@@ -389,73 +389,35 @@ function makeBronzeAfterLane(finalMatch, semiLoser, bronzeNumber) {
 async function ensureStateOnRead(tournamentMatch, { forceRebuild = true } = {}) {
   try {
     let changed = false;
-
-    // Turnuva final maçlarını düzelt
-    const fixedTournament = fixTournamentFinals(tournamentMatch);
-    if (fixedTournament !== tournamentMatch) {
-      tournamentMatch = fixedTournament;
+    
+    // IJF Repechage sistemi - sadece liste döndür
+    if (tournamentMatch.tournamentType === 'double_elimination') {
+      console.log('IJF Repechage listesi oluşturuluyor...');
+      const ijfList = getSimpleIJFRepechage(tournamentMatch.brackets || []);
+      
+      // Turnuva objesine IJF listesini ekle
+      tournamentMatch.ijfRepechageList = ijfList;
       changed = true;
     }
-
-    // IJF Repechage sistemi - her okumada otomatik uygula
-    if (tournamentMatch.tournamentType === 'double_elimination') {
-      console.log('IJF Repechage sistemi otomatik uygulanıyor...');
-      
-      // Mevcut loser bracket'ı IJF sistemi ile karşılaştır
-      const { lb: ijfRepechage, changed: repechageChanged, reason } = maintainLoserBrackets(
-        tournamentMatch.brackets || [], 
-        tournamentMatch.loserBrackets || []
-      );
-      
-      if (repechageChanged) {
-        console.log(`IJF Repechage güncellendi: ${reason}`);
-        tournamentMatch.loserBrackets = ijfRepechage;
-        changed = true;
-      } else {
-        console.log('IJF Repechage güncel, değişiklik yok');
-      }
-    }
-
-    // Winner bracket advancement'ı işle
+    
+    // Basit işlemler
     tournamentMatch = await processAdvancement(tournamentMatch);
-
-    // Eğer değişiklik varsa kaydet
+    
     if (changed) {
-      console.log('Turnuva IJF sistemi ile güncellendi, kaydediliyor...');
+      console.log('Turnuva IJF listesi ile güncellendi, kaydediliyor...');
       await tournamentMatch.save();
     }
-
-    // Fresh data al ve display number'ları ekle
+    
     const fresh = await TournamentMatch.findById(tournamentMatch._id).populate({
       path: 'organisationId',
       select: 'tournamentName tournamentDate tournamentPlace'
     });
-
+    
     const stats = fresh.getStats();
     const baseObj = fresh.toObject();
-    
-    // LoserBrackets için display number ataması
-    if (Array.isArray(baseObj.loserBrackets) && baseObj.loserBrackets.length) {
-      const losersClone = baseObj.loserBrackets.map(m => ({ ...m }));
-      // Winner bracket final hariç sayısı kadar offset ver
-      const wb = baseObj.brackets || [];
-      const wbMaxRound = wb.reduce((m,x)=>Math.max(m, x.roundNumber||0), 0);
-      const wbFinal = wb.find(m => (m.roundNumber === wbMaxRound) && !m.nextMatchNumber);
-      const wbCountWithoutFinal = wb.filter(m => !wbFinal || m.matchNumber !== wbFinal.matchNumber).length;
-      const baseStart = wbCountWithoutFinal + 1;
-      renumberLosers(losersClone, baseStart);
-      
-      // Display number'ları geri yaz
-      const dispByNum = Object.fromEntries(losersClone.map(m => [m.matchNumber, m.displayNumber]));
-      baseObj.loserBrackets = baseObj.loserBrackets.map(m => ({ 
-        ...m, 
-        displayNumber: dispByNum[m.matchNumber] ?? m.displayNumber 
-      }));
-    }
-    
     const withDisplay = attachDisplayNumbers(baseObj);
-    return { body: { ...withDisplay, stats }, fresh, changed };
     
+    return { body: { ...withDisplay, stats }, fresh, changed };
   } catch (error) {
     console.error('ensureStateOnRead hatası:', error);
     const stats = tournamentMatch.getStats();
@@ -1970,38 +1932,7 @@ function reconcileLoserBrackets(savedLB, derivedLB) {
   return merged;
 }
 
-// Ana LB yönetim fonksiyonu - IJF tarzı repechage
-function maintainLoserBrackets(wb, savedLB) {
-  console.log('IJF Repechage sistemi çalışıyor...');
-  
-  // Winner bracket'ta yanlış final maçlarını düzelt
-  const fixedWB = fixIncorrectFinals([...wb]);
-  
-  // IJF tarzı repechage oluştur
-  const ijfRepechage = buildIJFRepechage(fixedWB);
-  
-  if (!ijfRepechage.length) {
-    console.log('IJF Repechage oluşturulamadı - yarı final henüz hazır değil');
-    return { lb: [], changed: (savedLB?.length || 0) > 0, reason: 'no-repechage' };
-  }
-  
-  console.log(`IJF Repechage oluşturuldu: ${ijfRepechage.length} maç`);
-  
-  // Kayıtlı sonuçları koru
-  const merged = reconcileLoserBrackets(savedLB || [], ijfRepechage);
-  
-  // BYE'leri otomatik ilerlet
-  autoAdvanceByes(merged);
-  
-  const changed = JSON.stringify(savedLB || []) !== JSON.stringify(merged);
-  console.log(`IJF Repechage ${changed ? 'güncellendi' : 'değişmedi'}`);
-  
-  return { 
-    lb: merged, 
-    changed, 
-    reason: changed ? 'ijf-reconciled' : 'ijf-ok' 
-  };
-}
+// Eski karmaşık maintainLoserBrackets fonksiyonu kaldırıldı
 
 // IJF tarzı bronz maçları oluşturur
 // Artık kullanılmayan eski fonksiyonlar kaldırıldı
@@ -2214,245 +2145,9 @@ function fixTournamentFinals(tournamentMatch) {
   return tournamentMatch;
 }
 
-// IJF tarzı repechage sistemi - düzeltilmiş versiyon
-function buildIJFRepechage(wb) {
-  if (!wb?.length) return [];
-  
-  const maxRound = Math.max(...wb.map(m => m.roundNumber || 0));
-  console.log(`\n=== IJF REPECHAGE DEBUG ===`);
-  console.log(`Maksimum round: ${maxRound}`);
-  
-  // Yarı finalleri bul (final'den bir önceki round)
-  const semis = wb
-    .filter(m => m.roundNumber === maxRound - 1 && m.player1 && m.player2)
-    .sort((a, b) => a.matchNumber - b.matchNumber);
-  
-  console.log(`Yarı final sayısı: ${semis.length}`);
-  console.log('Yarı finaller:', semis.map(s => `Maç ${s.matchNumber}: ${s.player1.name} vs ${s.player2.name}`));
-  
-  if (semis.length < 2) {
-    console.log('IJF Repechage: Yeterli yarı final yok');
-    return [];
-  }
-  
-  const [semiA, semiB] = semis;
-  
-  // Yarı finalistleri bul
-  const semiAFinalists = [semiA.player1, semiA.player2].filter(Boolean);
-  const semiBFinalists = [semiB.player1, semiB.player2].filter(Boolean);
-  
-  console.log('\n--- Yarı Finalistler ---');
-  console.log('Yarı A finalistleri:', semiAFinalists.map(p => p.name));
-  console.log('Yarı B finalistleri:', semiBFinalists.map(p => p.name));
-  
-  // Yarı finalistlere kaybeden oyuncuları topla (seviyeye göre)
-  const getLosersToSemiFinalists = (semiFinalists, poolName) => {
-    const losers = [];
-    
-    for (const finalist of semiFinalists) {
-      if (!finalist?.participantId) continue;
-      
-      console.log(`\n${poolName}: ${finalist.name}'e kaybedenleri arıyorum...`);
-      
-      // Bu finalist'in kazandığı tüm maçlardaki kaybedenleri bul
-      for (const match of wb) {
-        if (!isCompleted(match) || !match.player1 || !match.player2) continue;
-        
-        const winner = getWinner(match);
-        if (winner?.participantId === finalist.participantId) {
-          const loser = getLoser(match);
-          if (loser?.participantId) {
-            console.log(`  ✓ Maç ${match.matchNumber}: ${loser.name} (Round ${match.roundNumber})`);
-            losers.push({
-              player: loser,
-              fromMatch: match.matchNumber,
-              roundNumber: match.roundNumber,
-              lostToFinalist: finalist
-            });
-          }
-        }
-      }
-    }
-    
-    // Seviyeye göre sırala (erken tur önce)
-    const sorted = losers.sort((a, b) => {
-      // Önce round number'a göre sırala (küçük olan önce)
-      if (a.roundNumber !== b.roundNumber) {
-        return a.roundNumber - b.roundNumber;
-      }
-      // Aynı round'da ise match number'a göre sırala
-      return a.fromMatch - b.fromMatch;
-    });
-    
-    console.log(`\n${poolName} final sıralanmış liste (${sorted.length} oyuncu):`);
-    sorted.forEach((item, index) => {
-      console.log(`  ${index + 1}. ${item.player.name} (Round ${item.roundNumber}, Maç ${item.fromMatch})`);
-    });
-    
-    return sorted;
-  };
-  
-  // Her yarı için kaybedenleri topla
-  const poolA = getLosersToSemiFinalists(semiAFinalists, 'Pool A');
-  const poolB = getLosersToSemiFinalists(semiBFinalists, 'Pool B');
-  
-  console.log(`\n--- Toplam Repechage Oyuncuları ---`);
-  console.log(`Pool A: ${poolA.length} oyuncu`);
-  console.log(`Pool B: ${poolB.length} oyuncu`);
-  console.log(`Toplam: ${poolA.length + poolB.length} oyuncu`);
-  
-  // Şimdi repechage maçlarını oluştur
-  const repechageMatches = [];
-  
-  // Pool A için repechage şeridi
-  if (poolA.length > 0) {
-    console.log(`\nPool A repechage şeridi oluşturuluyor: ${poolA.length} oyuncu`);
-    const laneAMatches = createRepechageLane(1000, poolA.map(p => p.player));
-    repechageMatches.push(...laneAMatches);
-  }
-  
-  // Pool B için repechage şeridi
-  if (poolB.length > 0) {
-    console.log(`\nPool B repechage şeridi oluşturuluyor: ${poolB.length} oyuncu`);
-    const laneBMatches = createRepechageLane(1100, poolB.map(p => p.player));
-    repechageMatches.push(...laneBMatches);
-  }
-  
-  // Bronz maçlarını ekle
-  const semiALoser = getLoser(semiA);
-  const semiBLoser = getLoser(semiB);
-  
-  console.log(`\n--- Bronz Maçları ---`);
-  console.log(`Bronz A: Repechage A kazananı vs ${semiALoser?.name || 'Bilinmiyor'}`);
-  console.log(`Bronz B: Repechage B kazananı vs ${semiBLoser?.name || 'Bilinmiyor'}`);
-  
-  const bronzeA = {
-    roundNumber: 99,
-    matchNumber: 1099,
-    player1: null, // Repechage A kazananı
-    player2: semiALoser, // Yarı A kaybedeni
-    status: 'scheduled',
-    winner: null,
-    score: { player1Score: 0, player2Score: 0 },
-    scheduledTime: null,
-    completedAt: null,
-    nextMatchNumber: null,
-    nextMatchSlot: null,
-    notes: 'Bronz A - IJF Repechage'
-  };
-  
-  const bronzeB = {
-    roundNumber: 99,
-    matchNumber: 1199,
-    player1: null, // Repechage B kazananı
-    player2: semiBLoser, // Yarı B kaybedeni
-    status: 'scheduled',
-    winner: null,
-    score: { player1Score: 0, player2Score: 0 },
-    scheduledTime: null,
-    completedAt: null,
-    nextMatchNumber: null,
-    nextMatchSlot: null,
-    notes: 'Bronz B - IJF Repechage'
-  };
-  
-  repechageMatches.push(bronzeA, bronzeB);
-  
-  console.log(`\n=== IJF REPECHAGE TAMAMLANDI ===`);
-  console.log(`Toplam maç sayısı: ${repechageMatches.length}`);
-  return repechageMatches;
-}
+// Eski karmaşık IJF fonksiyonu kaldırıldı
 
-// IJF repechage için tek şerit oluştur - seviyeye göre
-function createRepechageLane(startNumber, players) {
-  if (!players || players.length === 0) return [];
-  
-  console.log(`Repechage şeridi oluşturuluyor: ${players.length} oyuncu`);
-  console.log('Oyuncular (seviyeye göre):', players.map(p => p.name));
-  
-  const matches = [];
-  let currentPlayers = [...players];
-  let matchNumber = startNumber;
-  let roundNumber = 1;
-  
-  // Eğer tek oyuncu varsa, direkt bronza geçer
-  if (currentPlayers.length === 1) {
-    const bronzeNumber = startNumber === 1000 ? 1099 : 1199;
-    console.log(`${currentPlayers[0].name} direkt bronza geçiyor`);
-    return [{
-      roundNumber: 1,
-      matchNumber: matchNumber,
-      player1: currentPlayers[0],
-      player2: null,
-      status: 'completed',
-      winner: 'player1',
-      score: { player1Score: 0, player2Score: 0 },
-      scheduledTime: null,
-      completedAt: new Date(),
-      nextMatchNumber: bronzeNumber,
-      nextMatchSlot: 'player1',
-      notes: 'Otomatik BYE - Bronza geçti'
-    }];
-  }
-  
-  // Çift eliminasyon şeridi oluştur
-  while (currentPlayers.length > 1) {
-    console.log(`Round ${roundNumber}: ${currentPlayers.length} oyuncu`);
-    
-    const roundMatches = [];
-    const nextRoundPlayers = [];
-    
-    // Bu turda maçları oluştur
-    for (let i = 0; i < currentPlayers.length; i += 2) {
-      const player1 = currentPlayers[i];
-      const player2 = currentPlayers[i + 1] || null;
-      
-      const match = {
-        roundNumber: roundNumber,
-        matchNumber: matchNumber++,
-        player1: player1,
-        player2: player2,
-        status: 'scheduled',
-        winner: null,
-        score: { player1Score: 0, player2Score: 0 },
-        scheduledTime: null,
-        completedAt: null,
-        nextMatchNumber: null,
-        nextMatchSlot: null,
-        notes: ''
-      };
-      
-      // Eğer tek oyuncu varsa otomatik geçer
-      if (!player2) {
-        match.status = 'completed';
-        match.winner = 'player1';
-        match.completedAt = new Date();
-        match.notes = 'Otomatik BYE';
-        nextRoundPlayers.push(player1);
-        console.log(`  ${player1.name} BYE ile geçiyor`);
-      }
-      
-      roundMatches.push(match);
-      if (player2) {
-        // Kazanan bir sonraki tura geçecek (şimdilik placeholder)
-        nextRoundPlayers.push(null);
-        console.log(`  ${player1.name} vs ${player2.name}`);
-      }
-    }
-    
-    matches.push(...roundMatches);
-    
-    // Eğer bir sonraki turda tek oyuncu kalacaksa, o bronza geçer
-    if (Math.ceil(currentPlayers.length / 2) === 1) {
-      const lastMatch = roundMatches[roundMatches.length - 1];
-      const bronzeNumber = startNumber === 1000 ? 1099 : 1199;
-      lastMatch.nextMatchNumber = bronzeNumber;
-      lastMatch.nextMatchSlot = 'player1';
-      console.log(`Son maç bronza bağlandı: ${bronzeNumber}`);
-      break;
-    }
-    
-    // Next match bağlantılarını kur
+// Eski karmaşık createRepechageLane fonksiyonu kaldırıldı
     if (roundMatches.length > 1) {
       for (let i = 0; i < roundMatches.length; i++) {
         if (roundMatches[i].player2) { // Sadece gerçek maçlar için
@@ -2462,106 +2157,11 @@ function createRepechageLane(startNumber, players) {
           roundMatches[i].nextMatchSlot = (i % 2 === 0) ? 'player1' : 'player2';
         }
       }
-    }
-    
-    // Bir sonraki tur için hazırla
-    currentPlayers = nextRoundPlayers.filter(Boolean);
-    roundNumber++;
-  }
-  
-  console.log(`Repechage şeridi tamamlandı: ${matches.length} maç`);
-  return matches;
-}
+// Eski kod parçası kaldırıldı
 
-// IJF Repechage test endpoint'i
-router.post("/:id/fix-ijf-repechage", auth, async (req, res) => {
-  try {
-    const tournamentMatch = await TournamentMatch.findById(req.params.id);
-    if (!tournamentMatch) {
-      return res.status(404).json({ error: "Turnuva maçı bulunamadı" });
-    }
-    
-    if (tournamentMatch.tournamentType !== 'double_elimination') {
-      return res.status(400).json({ error: "Bu işlem sadece double elimination turnuvalar için geçerlidir" });
-    }
-    
-    console.log('IJF Repechage düzeltme başlatılıyor...');
-    
-    // Mevcut loser bracket'ı temizle
-    tournamentMatch.loserBrackets = [];
-    
-    // IJF tarzı repechage oluştur
-    const { lb, changed, reason } = maintainLoserBrackets(tournamentMatch.brackets || [], []);
-    
-    if (changed) {
-      tournamentMatch.loserBrackets = lb;
-      await tournamentMatch.save();
-      console.log('IJF Repechage başarıyla oluşturuldu');
-    }
-    
-    const { body } = await ensureStateOnRead(tournamentMatch, { forceRebuild: false });
-    
-    res.json({
-      success: true,
-      message: 'IJF Repechage sistemi düzeltildi',
-      reason: reason,
-      changed: changed,
-      data: body
-    });
-    
-  } catch (error) {
-    console.error('IJF Repechage düzeltme hatası:', error);
-    res.status(500).json({ error: "Sunucu hatası", details: error.message });
-  }
-});
+// Eski IJF endpoint'i kaldırıldı
 
-// IJF Repechage debug endpoint'i
-router.get("/:id/debug-ijf", auth, async (req, res) => {
-  try {
-    const tournamentMatch = await TournamentMatch.findById(req.params.id);
-    if (!tournamentMatch) {
-      return res.status(404).json({ error: "Turnuva maçı bulunamadı" });
-    }
-    
-    const wb = tournamentMatch.brackets || [];
-    const maxRound = Math.max(...wb.map(m => m.roundNumber || 0));
-    
-    // Yarı finalleri bul
-    const semis = wb
-      .filter(m => m.roundNumber === maxRound - 1 && m.player1 && m.player2)
-      .sort((a, b) => a.matchNumber - b.matchNumber);
-    
-    const debug = {
-      maxRound: maxRound,
-      semiCount: semis.length,
-      semis: semis.map(s => ({
-        matchNumber: s.matchNumber,
-        roundNumber: s.roundNumber,
-        player1: s.player1?.name,
-        player2: s.player2?.name,
-        winner: s.winner,
-        status: s.status
-      }))
-    };
-    
-    if (semis.length >= 2) {
-      const [semiA, semiB] = semis;
-      
-      // Yarı finalistleri bul
-      const semiAFinalists = [semiA.player1, semiA.player2].filter(Boolean);
-      const semiBFinalists = [semiB.player1, semiB.player2].filter(Boolean);
-      
-      debug.semiAFinalists = semiAFinalists.map(p => p.name);
-      debug.semiBFinalists = semiBFinalists.map(p => p.name);
-      
-      // Yarı final kaybedenlerini bul
-      debug.semiALoser = getLoser(semiA)?.name || null;
-      debug.semiBLoser = getLoser(semiB)?.name || null;
-      
-      // Pool A - Berat Tok ve Musap Yelken'e kaybedenler
-      const poolA = [];
-      for (const finalist of semiAFinalists) {
-        for (const match of wb) {
+// Eski debug endpoint'i kaldırıldı
           if (!isCompleted(match) || !match.player1 || !match.player2) continue;
           const winner = getWinner(match);
           if (winner?.participantId === finalist.participantId) {
@@ -2800,6 +2400,117 @@ router.get("/:id/test-ijf", async (req, res) => {
     
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Basit IJF Repechage sistemi - sadece yarı finalistlere kaybedenleri listeler
+function getSimpleIJFRepechage(wb) {
+  if (!wb?.length) return { poolA: [], poolB: [] };
+  
+  const maxRound = Math.max(...wb.map(m => m.roundNumber || 0));
+  console.log(`\n=== BASIT IJF REPECHAGE ===`);
+  console.log(`Maksimum round: ${maxRound}`);
+  
+  // Yarı finalleri bul (final'den bir önceki round)
+  const semis = wb
+    .filter(m => m.roundNumber === maxRound - 1 && m.player1 && m.player2)
+    .sort((a, b) => a.matchNumber - b.matchNumber);
+  
+  console.log(`Yarı final sayısı: ${semis.length}`);
+  
+  if (semis.length < 2) {
+    console.log('Yeterli yarı final yok');
+    return { poolA: [], poolB: [] };
+  }
+  
+  const [semiA, semiB] = semis;
+  console.log(`Yarı A: Maç ${semiA.matchNumber} - ${semiA.player1.name} vs ${semiA.player2.name}`);
+  console.log(`Yarı B: Maç ${semiB.matchNumber} - ${semiB.player1.name} vs ${semiB.player2.name}`);
+  
+  // Yarı finalistleri bul
+  const semiAFinalists = [semiA.player1, semiA.player2].filter(Boolean);
+  const semiBFinalists = [semiB.player1, semiB.player2].filter(Boolean);
+  
+  // Yarı finalistlere kaybeden oyuncuları topla
+  const getLosersToSemiFinalists = (semiFinalists, poolName) => {
+    const losers = [];
+    
+    for (const finalist of semiFinalists) {
+      if (!finalist?.participantId) continue;
+      
+      console.log(`\n${poolName}: ${finalist.name}'e kaybedenleri arıyorum...`);
+      
+      // Bu finalist'in kazandığı tüm maçlardaki kaybedenleri bul
+      for (const match of wb) {
+        if (!isCompleted(match) || !match.player1 || !match.player2) continue;
+        
+        const winner = getWinner(match);
+        if (winner?.participantId === finalist.participantId) {
+          const loser = getLoser(match);
+          if (loser?.participantId) {
+            console.log(`  ✓ Maç ${match.matchNumber}: ${loser.name} (Round ${match.roundNumber})`);
+            losers.push({
+              player: loser,
+              fromMatch: match.matchNumber,
+              roundNumber: match.roundNumber,
+              lostToFinalist: finalist
+            });
+          }
+        }
+      }
+    }
+    
+    // Seviyeye göre sırala (erken tur önce)
+    const sorted = losers.sort((a, b) => {
+      if (a.roundNumber !== b.roundNumber) {
+        return a.roundNumber - b.roundNumber;
+      }
+      return a.fromMatch - b.fromMatch;
+    });
+    
+    console.log(`\n${poolName} final liste (${sorted.length} oyuncu):`);
+    sorted.forEach((item, index) => {
+      console.log(`  ${index + 1}. ${item.player.name} (Round ${item.roundNumber}, Maç ${item.fromMatch})`);
+    });
+    
+    return sorted;
+  };
+  
+  // Her yarı için kaybedenleri topla
+  const poolA = getLosersToSemiFinalists(semiAFinalists, 'Pool A');
+  const poolB = getLosersToSemiFinalists(semiBFinalists, 'Pool B');
+  
+  console.log(`\n--- TOPLAM REPECHAGE OYUNCULARI ---`);
+  console.log(`Pool A: ${poolA.length} oyuncu`);
+  console.log(`Pool B: ${poolB.length} oyuncu`);
+  console.log(`Toplam: ${poolA.length + poolB.length} oyuncu`);
+  
+  return { poolA, poolB };
+}
+
+// Basit IJF test endpoint'i
+router.get("/:id/test-ijf", auth, async (req, res) => {
+  try {
+    const tournamentMatch = await TournamentMatch.findById(req.params.id);
+    if (!tournamentMatch) {
+      return res.status(404).json({ error: "Turnuva maçı bulunamadı" });
+    }
+    
+    if (tournamentMatch.tournamentType !== 'double_elimination') {
+      return res.status(400).json({ error: "Bu işlem sadece double elimination turnuvalar için geçerlidir" });
+    }
+    
+    const ijfList = getSimpleIJFRepechage(tournamentMatch.brackets || []);
+    
+    res.json({
+      success: true,
+      message: 'IJF Repechage listesi',
+      data: ijfList
+    });
+    
+  } catch (error) {
+    console.error('IJF test hatası:', error);
+    res.status(500).json({ error: "Sunucu hatası", details: error.message });
   }
 });
 

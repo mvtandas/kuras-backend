@@ -36,6 +36,8 @@ app.use("/api/clubs", require("./routes/clubs"));
 app.use("/api/organisations", require("./routes/organisations"));
 app.use("/api/belts", require("./routes/belts"));
 app.use("/api/tournament-matches", require("./routes/tournamentMatches"));
+app.use("/api/mats", require("./routes/mats"));
+app.use("/api/mat-assignments", require("./routes/matAssignments"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

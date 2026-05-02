@@ -18,6 +18,12 @@ const {
   drawPageFooter,
   drawSignatureArea,
   LAYOUT,
+  COMPACT_LAYOUT,
+  drawCompactPageHeader,
+  drawCompactTableHeaders,
+  drawCompactRow,
+  drawCompactGroupHeader,
+  drawCompactSignature,
 } = require('../utils/pdfGenerator');
 
 // ADMIN ONLY ROUTES
@@ -799,7 +805,7 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
       p.athlete.gender === gender
     );
 
-    // Sütun tanımları – 5 sütun → portrait
+    // 5 sütun, portrait – compact layout
     const headers = [
       { label: '#',        width: 30  },
       { label: 'Ad Soyad', width: 190 },
@@ -807,28 +813,34 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
       { label: 'Tarti',    width: 70  },
       { label: 'Imza',     width: 95  },
     ];
-    const totalW  = headers.reduce((s, c) => s + c.width, 0);
-    const layout  = chooseLayout(headers.length, totalW);
-    const doc     = createDoc(layout, { Title: 'Tarti Listesi', Subject: organisation.tournamentName });
-    const m       = LAYOUT.margin;
-    const tableLeft = m;
+    const totalW = headers.reduce((s, c) => s + c.width, 0);
+    const layout = chooseLayout(headers.length, totalW);
+    const m      = COMPACT_LAYOUT.margin;
+
+    const doc = createDoc(layout, { Title: 'Tarti Listesi', Subject: organisation.tournamentName });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=weighing-list-${weight}.pdf`);
     doc.pipe(res);
 
-    const subtitle = `TARTI LISTESI  |  ${weight} kg - ${turkishToAscii(gender)}`;
+    const pageTitle = `TARTI LISTESI  |  ${turkishToAscii(organisation.tournamentName)}  |  ${weight} kg - ${turkishToAscii(gender)}`;
+    const tableLeft = m;
+    // Reserve bottom space: signature (35px) + footer (20px) + gap (10px) = 65px
+    const bottomReserve = 65;
 
-    let contentY = drawPageHeader(doc, organisation, subtitle);
-    let rowY     = drawTableHeaders(doc, tableLeft, headers, contentY);
+    let contentY = drawCompactPageHeader(doc, pageTitle);
+    let rowY     = drawCompactTableHeaders(doc, tableLeft, headers, contentY);
     let rowIsColored = false;
 
     filteredParticipants.forEach((participant, index) => {
-      if (rowY > doc.page.height - m - 80) {
-        drawPageFooter(doc);
+      if (rowY > doc.page.height - m - bottomReserve) {
+        // Footer + new page
+        doc.font('Times-Roman').fontSize(7).fillColor('#6b7280')
+           .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, m, doc.page.height - m - 10,
+             { width: doc.page.width - 2 * m, align: 'center' });
         doc.addPage({ size: 'A4', layout, margin: m });
-        const cy = drawPageHeader(doc, organisation, subtitle);
-        rowY = drawTableHeaders(doc, tableLeft, headers, cy);
+        const cy = drawCompactPageHeader(doc, pageTitle);
+        rowY = drawCompactTableHeaders(doc, tableLeft, headers, cy);
         rowIsColored = false;
       }
 
@@ -840,18 +852,23 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
         '',
       ];
 
-      rowY = drawTableRow(doc, tableLeft, headers, cells, rowY, rowIsColored);
+      rowY = drawCompactRow(doc, tableLeft, headers, cells, rowY, rowIsColored);
       rowIsColored = !rowIsColored;
     });
 
-    // İmza alanları
-    if (rowY > doc.page.height - m - 100) {
-      drawPageFooter(doc);
+    // İmza alanı: same page if space, otherwise new page
+    const sigNeeded = 55;
+    if (rowY + sigNeeded > doc.page.height - m - 20) {
+      doc.font('Times-Roman').fontSize(7).fillColor('#6b7280')
+         .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, m, doc.page.height - m - 10,
+           { width: doc.page.width - 2 * m, align: 'center' });
       doc.addPage({ size: 'A4', layout, margin: m });
-      rowY = m + 40;
+      rowY = m + 20;
     }
-    drawSignatureArea(doc, coordinator, chairman, rowY + 40);
-    drawPageFooter(doc);
+    drawCompactSignature(doc, coordinator, chairman, rowY + 15);
+    doc.font('Times-Roman').fontSize(7).fillColor('#6b7280')
+       .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, m, doc.page.height - m - 10,
+         { width: doc.page.width - 2 * m, align: 'center' });
     doc.end();
 
   } catch (error) {
@@ -928,7 +945,7 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
       return gA === 'Kadın' ? -1 : 1;
     });
 
-    // Sütun tanımları – 5 sütun → portrait
+    // 5 sütun, portrait – compact layout
     const headers = [
       { label: '#',        width: 30  },
       { label: 'Ad Soyad', width: 190 },
@@ -938,36 +955,49 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
     ];
     const totalW  = headers.reduce((s, c) => s + c.width, 0);
     const layout  = chooseLayout(headers.length, totalW);
-    const doc     = createDoc(layout, { Title: 'Tum Tarti Listeleri', Subject: organisation.tournamentName });
-    const m       = LAYOUT.margin;
+    const m       = COMPACT_LAYOUT.margin;
     const tableLeft = m;
+
+    const doc = createDoc(layout, { Title: 'Tum Tarti Listeleri', Subject: organisation.tournamentName });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=all-weighing-lists.pdf`);
     doc.pipe(res);
 
-    let contentY = drawPageHeader(doc, organisation, 'TUM TARTI LISTELERI');
+    const pageTitle = `TUM TARTI LISTELERI  |  ${turkishToAscii(organisation.tournamentName)}`;
+
+    function addFooter() {
+      doc.font('Times-Roman').fontSize(7).fillColor('#6b7280')
+         .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, m, doc.page.height - m - 10,
+           { width: doc.page.width - 2 * m, align: 'center' });
+    }
+
+    let contentY = drawCompactPageHeader(doc, pageTitle);
+    // bottom reserve: footer 20px + gap 10px
+    const bottomReserve = 30;
 
     sortedWeights.forEach((weightKey, weightIndex) => {
       const { weight, gender, participants: group } = participantsByWeight[weightKey];
+      const groupLabel = `${weight} kg - ${turkishToAscii(gender)}`;
 
-      if (weightIndex > 0 && contentY > doc.page.height - m - 80) {
-        drawPageFooter(doc);
+      // New page if group header + at least one row won't fit
+      if (contentY + 16 + COMPACT_LAYOUT.rowHeight > doc.page.height - m - bottomReserve) {
+        addFooter();
         doc.addPage({ size: 'A4', layout, margin: m });
-        contentY = drawPageHeader(doc, organisation, 'TUM TARTI LISTELERI');
+        contentY = drawCompactPageHeader(doc, pageTitle);
       }
 
-      contentY = drawGroupHeader(doc, tableLeft, totalW, `${weight} kg - ${turkishToAscii(gender)}`, contentY);
-      let rowY = drawTableHeaders(doc, tableLeft, headers, contentY);
+      contentY = drawCompactGroupHeader(doc, tableLeft, totalW, groupLabel, contentY);
+      let rowY = drawCompactTableHeaders(doc, tableLeft, headers, contentY);
       let rowIsColored = false;
 
       group.forEach((participant, index) => {
-        if (rowY > doc.page.height - m - 40) {
-          drawPageFooter(doc);
+        if (rowY > doc.page.height - m - bottomReserve) {
+          addFooter();
           doc.addPage({ size: 'A4', layout, margin: m });
-          const cy = drawPageHeader(doc, organisation, 'TUM TARTI LISTELERI');
-          const gy = drawGroupHeader(doc, tableLeft, totalW, `${weight} kg - ${turkishToAscii(gender)} (devam)`, cy);
-          rowY = drawTableHeaders(doc, tableLeft, headers, gy);
+          const cy = drawCompactPageHeader(doc, pageTitle);
+          const gy = drawCompactGroupHeader(doc, tableLeft, totalW, `${groupLabel} (devam)`, cy);
+          rowY = drawCompactTableHeaders(doc, tableLeft, headers, gy);
           rowIsColored = false;
         }
 
@@ -979,22 +1009,23 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
           '',
         ];
 
-        rowY = drawTableRow(doc, tableLeft, headers, cells, rowY, rowIsColored);
+        rowY = drawCompactRow(doc, tableLeft, headers, cells, rowY, rowIsColored);
         rowIsColored = !rowIsColored;
       });
 
-      contentY = rowY + 12;
+      contentY = rowY + 6; // small gap between groups
     });
 
-    // İmza alanları son sayfada
-    let sigY = contentY + 30;
-    if (sigY > doc.page.height - m - 100) {
-      drawPageFooter(doc);
+    // İmza alanı – son sayfada, yer yoksa yeni sayfa aç
+    const sigNeeded = 55;
+    let sigY = contentY + 10;
+    if (sigY + sigNeeded > doc.page.height - m - 20) {
+      addFooter();
       doc.addPage({ size: 'A4', layout, margin: m });
-      sigY = m + 40;
+      sigY = m + 20;
     }
-    drawSignatureArea(doc, coordinator, chairman, sigY);
-    drawPageFooter(doc);
+    drawCompactSignature(doc, coordinator, chairman, sigY);
+    addFooter();
     doc.end();
 
   } catch (error) {

@@ -240,12 +240,128 @@ function drawSignatureArea(doc, coordinator, chairman, y) {
   }
 }
 
+// ─── Compact layout (weighing lists with 200+ rows) ──────────────────────────
+
+const COMPACT_LAYOUT = {
+  margin:       30, // tighter margins
+  rowHeight:    15, // compact rows (vs 20)
+  tableHeaderH: 16, // compact table header
+  headerH:      28, // single-strip page header
+};
+
+// ─── Compact page header (single 28px strip, everything in one line) ─────────
+// Returns Y where table content should begin.
+
+function drawCompactPageHeader(doc, title) {
+  const m = COMPACT_LAYOUT.margin;
+  const w = doc.page.width - 2 * m;
+  const h = COMPACT_LAYOUT.headerH;
+
+  doc.rect(m, m, w, h).fill(COLORS.primary);
+  doc.font(FONTS.bold).fontSize(9).fillColor(COLORS.white)
+     .text(turkishToAscii(title), m + 6, m + 9, { width: w - 12, lineBreak: false });
+
+  return m + h + 2; // content start Y
+}
+
+// ─── Compact table column headers (16px) ─────────────────────────────────────
+
+function drawCompactTableHeaders(doc, tableLeft, headers, tableTop) {
+  const totalW = headers.reduce((s, c) => s + c.width, 0);
+  const h      = COMPACT_LAYOUT.tableHeaderH;
+
+  doc.rect(tableLeft, tableTop, totalW, h).fill(COLORS.primary);
+
+  doc.font(FONTS.bold).fontSize(8).fillColor(COLORS.white);
+  let x = tableLeft;
+  for (const col of headers) {
+    doc.text(col.label, x + 3, tableTop + 3, { width: col.width - 6, lineBreak: false });
+    x += col.width;
+  }
+
+  doc.rect(tableLeft, tableTop, totalW, h).lineWidth(0.4).stroke(COLORS.tableBorder);
+  x = tableLeft;
+  for (let i = 0; i < headers.length - 1; i++) {
+    x += headers[i].width;
+    doc.moveTo(x, tableTop).lineTo(x, tableTop + h).lineWidth(0.4).stroke(COLORS.tableBorder);
+  }
+
+  return tableTop + h;
+}
+
+// ─── Compact data row (15px) ─────────────────────────────────────────────────
+
+function drawCompactRow(doc, tableLeft, headers, cells, rowY, altRow) {
+  const totalW = headers.reduce((s, c) => s + c.width, 0);
+  const rh     = COMPACT_LAYOUT.rowHeight;
+
+  if (altRow) {
+    doc.rect(tableLeft, rowY, totalW, rh).fill(COLORS.tableRowAlt);
+  }
+
+  doc.font(FONTS.regular).fontSize(8).fillColor(COLORS.dark);
+  let x = tableLeft;
+  for (let i = 0; i < headers.length; i++) {
+    const val = cells[i] !== undefined && cells[i] !== null ? String(cells[i]) : '';
+    doc.text(val, x + 3, rowY + 3, { width: headers[i].width - 6, lineBreak: false });
+    x += headers[i].width;
+  }
+
+  doc.rect(tableLeft, rowY, totalW, rh).lineWidth(0.4).stroke(COLORS.tableBorder);
+  x = tableLeft;
+  for (let i = 0; i < headers.length - 1; i++) {
+    x += headers[i].width;
+    doc.moveTo(x, rowY).lineTo(x, rowY + rh).lineWidth(0.4).stroke(COLORS.tableBorder);
+  }
+
+  return rowY + rh;
+}
+
+// ─── Compact group header (used in all-weighing-list) ────────────────────────
+
+function drawCompactGroupHeader(doc, tableLeft, totalW, label, y) {
+  const h = 16;
+  doc.rect(tableLeft, y, totalW, h).fill(COLORS.accent);
+  doc.font(FONTS.bold).fontSize(8).fillColor(COLORS.white)
+     .text(turkishToAscii(label), tableLeft + 5, y + 4, { width: totalW - 10, lineBreak: false });
+  return y + h;
+}
+
+// ─── Compact signature area (two columns, 35px tall total) ───────────────────
+
+function drawCompactSignature(doc, coordinator, chairman, y) {
+  const m     = COMPACT_LAYOUT.margin;
+  const sigW  = 170;
+  const useW  = doc.page.width - 2 * m;
+  const gap   = (useW - 2 * sigW) / 3;
+  const leftX = m + gap;
+  const rightX = m + 2 * gap + sigW;
+
+  doc.font(FONTS.bold).fontSize(8).fillColor(COLORS.dark);
+
+  doc.text('Koordinator', leftX, y, { width: sigW, align: 'center' });
+  doc.moveTo(leftX, y + 20).lineTo(leftX + sigW, y + 20).lineWidth(0.5).stroke(COLORS.dark);
+  if (coordinator) {
+    doc.font(FONTS.regular).fontSize(7.5).fillColor(COLORS.dark)
+       .text(turkishToAscii(coordinator), leftX, y + 23, { width: sigW, align: 'center' });
+  }
+
+  doc.font(FONTS.bold).fontSize(8).fillColor(COLORS.dark);
+  doc.text('Kurul Baskani', rightX, y, { width: sigW, align: 'center' });
+  doc.moveTo(rightX, y + 20).lineTo(rightX + sigW, y + 20).lineWidth(0.5).stroke(COLORS.dark);
+  if (chairman) {
+    doc.font(FONTS.regular).fontSize(7.5).fillColor(COLORS.dark)
+       .text(turkishToAscii(chairman), rightX, y + 23, { width: sigW, align: 'center' });
+  }
+}
+
 // ─── Exports ─────────────────────────────────────────────────────────────────
 
 module.exports = {
   COLORS,
   FONTS,
   LAYOUT,
+  COMPACT_LAYOUT,
   turkishToAscii,
   chooseLayout,
   createDoc,
@@ -255,4 +371,10 @@ module.exports = {
   drawGroupHeader,
   drawPageFooter,
   drawSignatureArea,
+  // compact variants
+  drawCompactPageHeader,
+  drawCompactTableHeaders,
+  drawCompactRow,
+  drawCompactGroupHeader,
+  drawCompactSignature,
 };

@@ -15,8 +15,8 @@ const auth = require("../middleware/auth");
     const pat = new RegExp(`(?:^|\\s*\\|\\s*)${escapeRegExp(label)}\\b`, 'gi');
     const cleaned = e
       .replace(pat, '')
-      .replace(/(?:\\s*\\|\\s*){2,}/g, ' | ')
-      .replace(/^\\s*\\|\\s*|\\s*\\|\\s*$/g, '')
+      .replace(/(?:\s*\|\s*){2,}/g, ' | ')
+      .replace(/^\s*\|\s*|\s*\|\s*$/g, '')
       .trim();
     return cleaned ? `${cleaned} | ${label}` : label;
   }
@@ -338,9 +338,12 @@ const auth = require("../middleware/auth");
       matchNumber++;
     }
     
-    // Sonraki turlar için boş maçlar
+    // Sonraki turlar için boş maçlar.
+    // roundStart: o andaki turun ilk maç numarası (her iterasyonda güncellenir)
+    let roundStart = matchNumber; // round 2'nin başlangıç maç numarası
     for (let round = 2; round <= levels; round++) {
       const matchesInRound = Math.pow(2, levels - round);
+      const nextRoundStart = roundStart + matchesInRound; // round+1'in başlangıcı
       
       for (let i = 0; i < matchesInRound; i++) {
         const match = {
@@ -353,14 +356,15 @@ const auth = require("../middleware/auth");
           score: { player1Score: 0, player2Score: 0 },
           scheduledTime: null,
           completedAt: null,
-          nextMatchNumber: round < levels ? Math.ceil(matchNumber / 2) + totalMatches + Math.pow(2, levels - round - 1) : null,
-          nextMatchSlot: matchNumber % 2 === 1 ? 'player1' : 'player2',
+          nextMatchNumber: round < levels ? nextRoundStart + Math.floor(i / 2) : null,
+          nextMatchSlot: i % 2 === 0 ? 'player1' : 'player2',
           notes: ''
         };
         
         brackets.push(match);
         matchNumber++;
       }
+      roundStart = nextRoundStart;
     }
     
     return brackets;
@@ -726,9 +730,12 @@ const auth = require("../middleware/auth");
     
     console.log(`Round 1'de toplam ${round1Losers.length} kaybeden var`);
     
-    // Her GET'te loser bracket'i tamamen sil ve yeniden oluştur
-    if (round1Losers.length > 0) {
-      console.log('Loser bracket tamamen siliniyor ve yeniden oluşturuluyor...');
+    // Loser bracket yoksa veya tüm maçları tamamlanmamışsa yeniden oluştur.
+    // Tamamlanmış maçlar varsa mevcut loser bracket korunur (sonuçlar silinmez).
+    const hasCompletedLoserMatches = (tournamentMatch.loserBrackets || []).some(
+      m => m.status === 'completed'
+    );
+    if (round1Losers.length > 0 && !hasCompletedLoserMatches) {
       
       // Loser bracket'i tamamen temizle
       tournamentMatch.loserBrackets = [];
@@ -1417,5 +1424,495 @@ router.get("/:id/stats", auth, async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+// ─── Fixture / Bracket PDF ────────────────────────────────────────────────────
+// GET /tournament-matches/:id/fixture-pdf
+// Renders the bracket tree for a tournament as a landscape A4 PDF.
+
+// Helper: determine final placings from bracket structure
+function buildPlacements(brackets, loserBrackets, tournamentType) {
+  if (!brackets || brackets.length === 0) return [];
+
+  const maxRound = Math.max(...brackets.map(b => b.roundNumber));
+  const finalMatch = brackets.find(b => b.roundNumber === maxRound && !b.nextMatchNumber);
+  if (!finalMatch) return [];
+
+  const placements = [];
+
+  // 1st – final winner
+  if (finalMatch.winner && finalMatch[finalMatch.winner]) {
+    placements.push({ rank: '1.', name: finalMatch[finalMatch.winner].name });
+  }
+  // 2nd – final loser
+  if (finalMatch.winner) {
+    const loserKey = finalMatch.winner === 'player1' ? 'player2' : 'player1';
+    if (finalMatch[loserKey]) placements.push({ rank: '2.', name: finalMatch[loserKey].name });
+  }
+
+  // 3rd – semifinal losers
+  const semis = brackets.filter(b => b.nextMatchNumber === finalMatch.matchNumber);
+  semis.forEach(semi => {
+    if (semi.winner) {
+      const loserKey = semi.winner === 'player1' ? 'player2' : 'player1';
+      if (semi[loserKey]) placements.push({ rank: '3.', name: semi[loserKey].name });
+    }
+  });
+
+  // 3rd (repechage) – loser bracket final winners (double elimination)
+  if (tournamentType === 'double_elimination' && loserBrackets && loserBrackets.length > 0) {
+    const lbMax = Math.max(...loserBrackets.map(b => b.roundNumber));
+    loserBrackets.filter(b => b.roundNumber === lbMax).forEach(m => {
+      if (m.winner && m[m.winner]) {
+        placements.push({ rank: '3.', name: m[m.winner].name });
+      }
+    });
+  }
+
+  // 5th – quarterfinal losers (the matches that feed into semis)
+  semis.forEach(semi => {
+    brackets.filter(b => b.nextMatchNumber === semi.matchNumber).forEach(qf => {
+      if (qf.winner) {
+        const loserKey = qf.winner === 'player1' ? 'player2' : 'player1';
+        if (qf[loserKey]) placements.push({ rank: '5.', name: qf[loserKey].name });
+      }
+    });
+  });
+
+  return placements;
+}
+
+router.get("/:id/fixture-pdf", auth, async (req, res) => {
+  try {
+    const base = await TournamentMatch.findById(req.params.id)
+      .populate({
+        path: 'organisationId',
+        select: 'tournamentName tournamentDate tournamentPlace',
+        populate: { path: 'tournamentPlace.city', select: 'name' },
+      });
+
+    if (!base) return res.status(404).json({ message: "Turnuva bulunamadı" });
+
+    const tm  = base.toObject();
+    const org = tm.organisationId;
+
+    const PDFDocument = require('pdfkit');
+    const moment      = require('moment');
+    const { turkishToAscii: ta } = require('../utils/pdfGenerator');
+
+    // ── Portrait A4, white background ──────────────────────────────────────
+    const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margin: 0 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=fixture-${req.params.id}.pdf`);
+    doc.pipe(res);
+
+    const M  = 25;    // page margin
+    const PW = 595;   // A4 portrait width
+    const PH = 842;   // A4 portrait height
+
+    // ── Header – plain bold text on white ──────────────────────────────────
+    const startDate = org.tournamentDate
+      ? moment(org.tournamentDate.startDate).format('DD.MM.YYYY')
+      : '';
+    const endDate = org.tournamentDate && org.tournamentDate.endDate
+      ? moment(org.tournamentDate.endDate).format('DD.MM.YYYY')
+      : startDate;
+    const dateRange = startDate + (endDate && endDate !== startDate ? '-' + endDate : '');
+    const cityName  = org.tournamentPlace && org.tournamentPlace.city
+      ? ta(org.tournamentPlace.city.name) : '';
+
+    const titleLine = [
+      ta(org.tournamentName),
+      dateRange,
+      cityName,
+      ta(tm.weightCategory) + ' ' + ta(tm.gender),
+    ].filter(Boolean).join('  ');
+
+    doc.font('Times-Bold').fontSize(13).fillColor('#000000')
+       .text(titleLine, M, M + 4, { width: PW - 2 * M - 85, lineBreak: false });
+
+    const brackets      = tm.brackets || [];
+    const loserBrackets = tm.loserBrackets || [];
+
+    // Count unique real competitors (non-BYE) in round 1
+    const competitorCount = new Set(
+      brackets.filter(b => b.roundNumber === 1)
+        .flatMap(b => [b.player1, b.player2])
+        .filter(p => p && !p.isBye && p.name !== 'BYE')
+        .map(p => String(p.participantId || p.name))
+    ).size;
+
+    doc.font('Times-Roman').fontSize(8).fillColor('#888888')
+       .text(`Competitors: ${competitorCount}`, PW - M - 80, M + 8,
+         { width: 75, align: 'right', lineBreak: false });
+
+    if (brackets.length === 0) {
+      doc.font('Times-Roman').fontSize(10).fillColor('#000000')
+         .text('Fikstür verisi henüz oluşturulmamış.', M, M + 40);
+      doc.end();
+      return;
+    }
+
+    // ── Layout constants ────────────────────────────────────────────────────
+    const CONT_Y     = M + 28;              // content starts below header
+    const CONT_H     = PH - CONT_Y - M;     // full content height
+
+    // Right-side results table
+    const RESULTS_W  = 180;
+    const RESULTS_X  = PW - M - RESULTS_W;
+
+    // Bracket area (left side)
+    const BRKT_W     = RESULTS_X - M - 6;   // bracket area width
+    const GRP_LBL_W  = 15;                   // group label column (A, B, C…)
+    const NAME_W     = 160;                  // player name column
+    const NAME_END_X = M + GRP_LBL_W + NAME_W;
+    const ROUNDS_W   = BRKT_W - GRP_LBL_W - NAME_W; // remaining for bracket rounds
+
+    // ── Group brackets by round ─────────────────────────────────────────────
+    const roundMap = {};
+    for (const b of brackets) {
+      if (!roundMap[b.roundNumber]) roundMap[b.roundNumber] = [];
+      roundMap[b.roundNumber].push(b);
+    }
+    for (const r of Object.keys(roundMap)) {
+      roundMap[r].sort((a, b) => a.matchNumber - b.matchNumber);
+    }
+    const maxRound  = Math.max(...Object.keys(roundMap).map(Number));
+    const r1Matches = roundMap[1] || [];
+    const TOTAL_SLOTS = 2 * r1Matches.length; // total player slots in round 1
+
+    // Split vertical space: main bracket vs repechage
+    // 0.22 offset positions the vBar slightly before the right edge of each
+    // round column so there's room for the winner label to its right.
+    const VBAR_OFFSET_RATIO = 0.22;
+    const hasRepechage = tm.tournamentType === 'double_elimination' && loserBrackets.length > 0;
+    // Main bracket takes 56% if there's repechage; remaining 44% for repechage
+    const MAIN_BRACKET_HEIGHT_RATIO = 0.56;
+    const MAIN_H  = hasRepechage ? CONT_H * MAIN_BRACKET_HEIGHT_RATIO : CONT_H;
+    const SLOT_H  = MAIN_H / Math.max(TOTAL_SLOTS, 1);
+
+    const roundColW = ROUNDS_W / Math.max(maxRound, 1);
+    // vBarX: x-position of the vertical connecting bar for bracket round r
+    const vBarX = (r) => NAME_END_X + r * roundColW - roundColW * VBAR_OFFSET_RATIO;
+
+    // ── Compute match centre-Y positions ────────────────────────────────────
+    const matchCY = {};
+    r1Matches.forEach((m, i) => {
+      matchCY[m.matchNumber] = CONT_Y + (2 * i + 1) * SLOT_H;
+    });
+    for (let r = 2; r <= maxRound; r++) {
+      (roundMap[r] || []).forEach(m => {
+        const children = brackets.filter(b => b.nextMatchNumber === m.matchNumber);
+        const ys = children.map(c => matchCY[c.matchNumber]).filter(y => y !== undefined);
+        matchCY[m.matchNumber] = ys.length
+          ? ys.reduce((s, y) => s + y, 0) / ys.length
+          : CONT_Y + MAIN_H / 2;
+      });
+    }
+
+    // ── Helper: format player name for bracket ──────────────────────────────
+    // Produces "SURNAME, City/Club" matching reference image style
+    function fmtPlayer(p) {
+      if (!p || p.isBye || p.name === 'BYE') return '';
+      let s = ta(p.name);
+      const parts = [];
+      if (p.city)  parts.push(ta(p.city));
+      if (p.club && p.club !== p.city) parts.push(ta(p.club));
+      if (parts.length) s += ', ' + parts.join('/');
+      return s;
+    }
+
+    // ── Helper: draw one bracket match ──────────────────────────────────────
+    // Draws player lines, vertical bar, match circle, winner label, score.
+    function drawBracketMatch(match, cy, slotH, vx, roundColWidth, p1src, p2src) {
+      const p1Y = cy - slotH / 2;
+      const p2Y = cy + slotH / 2;
+      const CR  = Math.min(9, slotH * 0.28);     // circle radius
+      const fs  = Math.max(6, Math.min(8, slotH * 0.14)); // font size
+
+      // Player 1 name above its line
+      const name1 = fmtPlayer(p1src);
+      if (name1) {
+        doc.font('Times-Roman').fontSize(fs).fillColor('#000000')
+           .text(name1, NAME_END_X - NAME_W + 1, p1Y - fs - 1,
+             { width: NAME_W - 2, lineBreak: false });
+      }
+      // Player 2 name above its line
+      const name2 = fmtPlayer(p2src);
+      if (name2) {
+        doc.font('Times-Roman').fontSize(fs).fillColor('#000000')
+           .text(name2, NAME_END_X - NAME_W + 1, p2Y - fs - 1,
+             { width: NAME_W - 2, lineBreak: false });
+      }
+
+      // Horizontal lines from name-end to vBar
+      doc.lineWidth(0.6).strokeColor('#000000');
+      doc.moveTo(NAME_END_X, p1Y).lineTo(vx, p1Y).stroke();
+      doc.moveTo(NAME_END_X, p2Y).lineTo(vx, p2Y).stroke();
+      // Vertical connecting bar
+      doc.moveTo(vx, p1Y).lineTo(vx, p2Y).stroke();
+
+      // Match circle: white fill, black border
+      doc.circle(vx, cy, CR).fillAndStroke('#ffffff', '#000000');
+      doc.font('Times-Bold').fontSize(Math.max(5, CR * 0.85)).fillColor('#000000')
+         .text(String(match.matchNumber), vx - CR, cy - CR * 0.6,
+           { width: CR * 2, align: 'center', lineBreak: false });
+
+      // Score / notes – notes may be pipe-delimited; use the last segment
+      // Notes format (stored as "BYE | 00 10" or just "00 10")
+      const MAX_NOTE_LENGTH = 10;
+      if (match.status === 'completed' && match.notes) {
+        const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
+        if (note) {
+          doc.font('Times-Roman').fontSize(Math.max(5, CR * 0.7)).fillColor('#888888')
+             .text(note, vx - CR - 2, cy + CR * 0.5,
+               { width: CR * 2 + 4, align: 'center', lineBreak: false });
+        }
+      }
+
+      // Winner surname (bold) on the output line after the circle
+      const winner = match.winner ? match[match.winner] : null;
+      if (winner && winner.name) {
+        // Show only last "word" (surname) to keep it compact
+        const surname = ta(winner.name).split(' ').pop();
+        doc.font('Times-Bold').fontSize(Math.max(6, fs)).fillColor('#000000')
+           .text(surname, vx + CR + 3, cy - fs * 0.9,
+             { width: roundColWidth * 0.62, lineBreak: false });
+      }
+    }
+
+    // ── Draw group labels ────────────────────────────────────────────────────
+    const GRP_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+
+    r1Matches.forEach((match, idx) => {
+      const cy = matchCY[match.matchNumber];
+      if (GRP_LABELS[idx]) {
+        doc.font('Times-Bold').fontSize(11).fillColor('#000000')
+           .text(GRP_LABELS[idx], M, cy - 6,
+             { width: GRP_LBL_W, lineBreak: false });
+      }
+    });
+
+    // ── Draw round 1 ────────────────────────────────────────────────────────
+    r1Matches.forEach(match => {
+      const cy = matchCY[match.matchNumber];
+      drawBracketMatch(match, cy, SLOT_H, vBarX(1), roundColW,
+        match.player1, match.player2);
+
+      // Output line to round 2
+      if (match.nextMatchNumber != null) {
+        doc.lineWidth(0.6).strokeColor('#000000');
+        doc.moveTo(vBarX(1), cy).lineTo(vBarX(2), cy).stroke();
+      }
+    });
+
+    // ── Draw rounds 2+ ───────────────────────────────────────────────────────
+    for (let r = 2; r <= maxRound; r++) {
+      (roundMap[r] || []).forEach(match => {
+        const cy = matchCY[match.matchNumber];
+        if (cy === undefined) return;
+
+        const children = brackets
+          .filter(b => b.nextMatchNumber === match.matchNumber)
+          .sort((a, b) => (matchCY[a.matchNumber] || 0) - (matchCY[b.matchNumber] || 0));
+
+        // Vertical bar connecting the two child-output lines into this match
+        doc.lineWidth(0.6).strokeColor('#000000');
+        if (children.length >= 2) {
+          const y1 = matchCY[children[0].matchNumber];
+          const y2 = matchCY[children[children.length - 1].matchNumber];
+          if (y1 !== undefined && y2 !== undefined) {
+            doc.moveTo(vBarX(r), y1).lineTo(vBarX(r), y2).stroke();
+          }
+        }
+
+        const CR = Math.min(9, SLOT_H * 0.28);
+        doc.circle(vBarX(r), cy, CR).fillAndStroke('#ffffff', '#000000');
+        doc.font('Times-Bold').fontSize(Math.max(5, CR * 0.85)).fillColor('#000000')
+           .text(String(match.matchNumber), vBarX(r) - CR, cy - CR * 0.6,
+             { width: CR * 2, align: 'center', lineBreak: false });
+
+        const MAX_NOTE_LENGTH = 10;
+        if (match.status === 'completed' && match.notes) {
+          const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
+          if (note) {
+            doc.font('Times-Roman').fontSize(Math.max(5, CR * 0.7)).fillColor('#888888')
+               .text(note, vBarX(r) - CR - 2, cy + CR * 0.5,
+                 { width: CR * 2 + 4, align: 'center', lineBreak: false });
+          }
+        }
+
+        const winner = match.winner ? match[match.winner] : null;
+        if (winner && winner.name) {
+          const surname = ta(winner.name).split(' ').pop();
+          doc.font('Times-Bold').fontSize(Math.max(6, Math.min(8, SLOT_H * 0.14))).fillColor('#000000')
+             .text(surname, vBarX(r) + CR + 3, cy - Math.min(8, SLOT_H * 0.14) * 0.9,
+               { width: roundColW * 0.62, lineBreak: false });
+        }
+
+        // Output line to next round
+        if (match.nextMatchNumber != null && r < maxRound) {
+          doc.moveTo(vBarX(r), cy).lineTo(vBarX(r + 1), cy).stroke();
+        }
+      });
+    }
+
+    // ── Results table (right column, top-aligned with bracket) ───────────────
+    // Plain black-bordered table matching reference image style
+    const RES_ROW_H  = 16;
+    const RES_POS_W  = 24;
+    const RES_NAME_W = RESULTS_W - RES_POS_W;
+
+    let resY = CONT_Y;
+
+    // "Results" header – plain bold text, no colored box
+    doc.font('Times-Bold').fontSize(10).fillColor('#000000')
+       .text('Results', RESULTS_X, resY + 2, { width: RESULTS_W, lineBreak: false });
+    resY += 14;
+
+    // Column header row
+    doc.rect(RESULTS_X, resY, RESULTS_W, RES_ROW_H).lineWidth(0.5).stroke('#000000');
+    doc.font('Times-Bold').fontSize(7.5).fillColor('#000000')
+       .text('Pos', RESULTS_X + 3, resY + 4, { width: RES_POS_W - 4, lineBreak: false })
+       .text('Name', RESULTS_X + RES_POS_W + 3, resY + 4,
+         { width: RES_NAME_W - 6, lineBreak: false });
+    // Divider between Pos and Name columns
+    doc.moveTo(RESULTS_X + RES_POS_W, resY)
+       .lineTo(RESULTS_X + RES_POS_W, resY + RES_ROW_H)
+       .lineWidth(0.4).stroke('#000000');
+    resY += RES_ROW_H;
+
+    const placements = buildPlacements(brackets, loserBrackets, tm.tournamentType);
+    placements.forEach((p, idx) => {
+      // Alternate row background (very light gray on even rows)
+      if (idx % 2 === 0) {
+        doc.rect(RESULTS_X, resY, RESULTS_W, RES_ROW_H).fill('#f5f5f5');
+      }
+      doc.rect(RESULTS_X, resY, RESULTS_W, RES_ROW_H).lineWidth(0.4).stroke('#000000');
+      doc.moveTo(RESULTS_X + RES_POS_W, resY)
+         .lineTo(RESULTS_X + RES_POS_W, resY + RES_ROW_H)
+         .lineWidth(0.4).stroke('#000000');
+
+      doc.font('Times-Bold').fontSize(8).fillColor('#000000')
+         .text(p.rank, RESULTS_X + 3, resY + 4, { width: RES_POS_W - 4, lineBreak: false });
+      doc.font('Times-Roman').fontSize(7.5).fillColor('#000000')
+         .text(ta(p.name), RESULTS_X + RES_POS_W + 3, resY + 3.5,
+           { width: RES_NAME_W - 6, lineBreak: false });
+      resY += RES_ROW_H;
+    });
+
+    // ── Repechage section (double elimination) ───────────────────────────────
+    if (hasRepechage) {
+      const RPH_Y = CONT_Y + MAIN_H + 10;
+      const RPH_H = CONT_H - MAIN_H - 14;
+
+      // Section label – plain italic text
+      doc.font('Times-Roman').fontSize(8).fillColor('#555555')
+         .text('Repechage', M, RPH_Y - 2, { lineBreak: false });
+      // Thin horizontal rule above repechage
+      doc.moveTo(M, RPH_Y - 4).lineTo(M + BRKT_W, RPH_Y - 4)
+         .lineWidth(0.4).strokeColor('#aaaaaa').stroke();
+
+      // Group loser brackets by round
+      const lbMap = {};
+      for (const b of loserBrackets) {
+        if (!lbMap[b.roundNumber]) lbMap[b.roundNumber] = [];
+        lbMap[b.roundNumber].push(b);
+      }
+      for (const r of Object.keys(lbMap)) lbMap[r].sort((a, b) => a.matchNumber - b.matchNumber);
+
+      const lbMaxR = Math.max(...Object.keys(lbMap).map(Number));
+      const lbR1   = lbMap[1] || [];
+      const LB_SLOT = RPH_H / Math.max(2 * lbR1.length, 1);
+      const lbRCW   = ROUNDS_W / Math.max(lbMaxR, 1);
+      const lbVBarX = (r) => NAME_END_X + r * lbRCW - lbRCW * VBAR_OFFSET_RATIO;
+
+      // Compute repechage match Y positions
+      const lbCY = {};
+      lbR1.forEach((m, i) => { lbCY[m.matchNumber] = RPH_Y + 8 + (2 * i + 1) * LB_SLOT; });
+      for (let r = 2; r <= lbMaxR; r++) {
+        (lbMap[r] || []).forEach(m => {
+          const children = loserBrackets.filter(b => b.nextMatchNumber === m.matchNumber);
+          const ys = children.map(c => lbCY[c.matchNumber]).filter(y => y !== undefined);
+          lbCY[m.matchNumber] = ys.length
+            ? ys.reduce((s, y) => s + y, 0) / ys.length
+            : RPH_Y + RPH_H / 2;
+        });
+      }
+
+      // Draw repechage round 1
+      lbR1.forEach(match => {
+        const cy = lbCY[match.matchNumber];
+        drawBracketMatch(match, cy, LB_SLOT, lbVBarX(1), lbRCW,
+          match.player1, match.player2);
+        if (match.nextMatchNumber != null) {
+          doc.lineWidth(0.6).strokeColor('#000000');
+          doc.moveTo(lbVBarX(1), cy).lineTo(lbVBarX(2), cy).stroke();
+        }
+      });
+
+      // Draw repechage rounds 2+
+      for (let r = 2; r <= lbMaxR; r++) {
+        (lbMap[r] || []).forEach(match => {
+          const cy = lbCY[match.matchNumber];
+          if (cy === undefined) return;
+
+          const children = loserBrackets
+            .filter(b => b.nextMatchNumber === match.matchNumber)
+            .sort((a, b) => (lbCY[a.matchNumber] || 0) - (lbCY[b.matchNumber] || 0));
+
+          doc.lineWidth(0.6).strokeColor('#000000');
+          if (children.length >= 2) {
+            const y1 = lbCY[children[0].matchNumber];
+            const y2 = lbCY[children[children.length - 1].matchNumber];
+            if (y1 !== undefined && y2 !== undefined) {
+              doc.moveTo(lbVBarX(r), y1).lineTo(lbVBarX(r), y2).stroke();
+            }
+          }
+
+          const CR = Math.min(9, LB_SLOT * 0.28);
+          doc.circle(lbVBarX(r), cy, CR).fillAndStroke('#ffffff', '#000000');
+          doc.font('Times-Bold').fontSize(Math.max(5, CR * 0.85)).fillColor('#000000')
+             .text(String(match.matchNumber), lbVBarX(r) - CR, cy - CR * 0.6,
+               { width: CR * 2, align: 'center', lineBreak: false });
+
+          const MAX_NOTE_LENGTH = 10;
+          if (match.status === 'completed' && match.notes) {
+            const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
+            if (note) {
+              doc.font('Times-Roman').fontSize(Math.max(5, CR * 0.7)).fillColor('#888888')
+                 .text(note, lbVBarX(r) - CR - 2, cy + CR * 0.5,
+                   { width: CR * 2 + 4, align: 'center', lineBreak: false });
+            }
+          }
+
+          const winner = match.winner ? match[match.winner] : null;
+          if (winner && winner.name) {
+            const surname = ta(winner.name).split(' ').pop();
+            const fs = Math.max(6, Math.min(8, LB_SLOT * 0.14));
+            doc.font('Times-Bold').fontSize(fs).fillColor('#000000')
+               .text(surname, lbVBarX(r) + CR + 3, cy - fs * 0.9,
+                 { width: lbRCW * 0.62, lineBreak: false });
+          }
+
+          if (match.nextMatchNumber != null && r < lbMaxR) {
+            doc.moveTo(lbVBarX(r), cy).lineTo(lbVBarX(r + 1), cy).stroke();
+          }
+        });
+      }
+    }
+
+    // ── Footer ────────────────────────────────────────────────────────────────
+    doc.font('Times-Roman').fontSize(6.5).fillColor('#aaaaaa')
+       .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, M, PH - M - 8,
+         { width: PW - 2 * M, align: 'center', lineBreak: false });
+
+    doc.end();
+
+  } catch (error) {
+    console.error("Fixture PDF oluşturma hatası:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 
 module.exports = router; 

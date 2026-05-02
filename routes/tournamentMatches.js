@@ -15,8 +15,8 @@ const auth = require("../middleware/auth");
     const pat = new RegExp(`(?:^|\\s*\\|\\s*)${escapeRegExp(label)}\\b`, 'gi');
     const cleaned = e
       .replace(pat, '')
-      .replace(/(?:\\s*\\|\\s*){2,}/g, ' | ')
-      .replace(/^\\s*\\|\\s*|\\s*\\|\\s*$/g, '')
+      .replace(/(?:\s*\|\s*){2,}/g, ' | ')
+      .replace(/^\s*\|\s*|\s*\|\s*$/g, '')
       .trim();
     return cleaned ? `${cleaned} | ${label}` : label;
   }
@@ -338,9 +338,12 @@ const auth = require("../middleware/auth");
       matchNumber++;
     }
     
-    // Sonraki turlar için boş maçlar
+    // Sonraki turlar için boş maçlar.
+    // roundStart: o andaki turun ilk maç numarası (her iterasyonda güncellenir)
+    let roundStart = matchNumber; // round 2'nin başlangıç maç numarası
     for (let round = 2; round <= levels; round++) {
       const matchesInRound = Math.pow(2, levels - round);
+      const nextRoundStart = roundStart + matchesInRound; // round+1'in başlangıcı
       
       for (let i = 0; i < matchesInRound; i++) {
         const match = {
@@ -353,14 +356,15 @@ const auth = require("../middleware/auth");
           score: { player1Score: 0, player2Score: 0 },
           scheduledTime: null,
           completedAt: null,
-          nextMatchNumber: round < levels ? Math.ceil(matchNumber / 2) + totalMatches + Math.pow(2, levels - round - 1) : null,
-          nextMatchSlot: matchNumber % 2 === 1 ? 'player1' : 'player2',
+          nextMatchNumber: round < levels ? nextRoundStart + Math.floor(i / 2) : null,
+          nextMatchSlot: i % 2 === 0 ? 'player1' : 'player2',
           notes: ''
         };
         
         brackets.push(match);
         matchNumber++;
       }
+      roundStart = nextRoundStart;
     }
     
     return brackets;
@@ -726,9 +730,12 @@ const auth = require("../middleware/auth");
     
     console.log(`Round 1'de toplam ${round1Losers.length} kaybeden var`);
     
-    // Her GET'te loser bracket'i tamamen sil ve yeniden oluştur
-    if (round1Losers.length > 0) {
-      console.log('Loser bracket tamamen siliniyor ve yeniden oluşturuluyor...');
+    // Loser bracket yoksa veya tüm maçları tamamlanmamışsa yeniden oluştur.
+    // Tamamlanmış maçlar varsa mevcut loser bracket korunur (sonuçlar silinmez).
+    const hasCompletedLoserMatches = (tournamentMatch.loserBrackets || []).some(
+      m => m.status === 'completed'
+    );
+    if (round1Losers.length > 0 && !hasCompletedLoserMatches) {
       
       // Loser bracket'i tamamen temizle
       tournamentMatch.loserBrackets = [];

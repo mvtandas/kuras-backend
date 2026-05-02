@@ -1569,14 +1569,18 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
     const r1Matches   = roundMap[1] || [];
     const TOTAL_SLOTS = 2 * r1Matches.length;
 
-    // Determine bracket height: if double elimination, reserve 40% for repechage
+    // Determine bracket height: if double elimination, reserve 44% for repechage at bottom
+    const MAIN_BRACKET_HEIGHT_RATIO = 0.56; // 56% for winner bracket; remaining 44% for repechage
     const hasRepechage = tm.tournamentType === 'double_elimination' && loserBrackets.length > 0;
-    const MAIN_H = hasRepechage ? CONT_H * 0.56 : CONT_H;
+    const MAIN_H = hasRepechage ? CONT_H * MAIN_BRACKET_HEIGHT_RATIO : CONT_H;
     const SLOT_H = MAIN_H / Math.max(TOTAL_SLOTS, 1);
 
     const roundColW = ROUNDS_W / Math.max(maxRound, 1);
-    // vBarX: x of the vertical connecting bar for round r
-    const vBarX = (r) => NAME_END_X + r * roundColW - roundColW * 0.22;
+    // vBarX: x of the vertical connecting bar for round r.
+    // 0.22 offsets the bar slightly left within the round column so the
+    // winner-name label fits to the right of the match circle.
+    const VBAR_OFFSET_RATIO = 0.22;
+    const vBarX = (r) => NAME_END_X + r * roundColW - roundColW * VBAR_OFFSET_RATIO;
 
     // ── Compute match centre-Y positions ────────────────────────────────────
     const matchCY = {};
@@ -1635,9 +1639,10 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
            .text(ta(match[match.winner].name), vx + CR + 3, cy - 4,
              { width: roundColW * 0.65, lineBreak: false });
       }
-      // Score / notes
+      // Score / notes – notes may be pipe-delimited ("BYE | 10-0"); take the last segment
+      const MAX_NOTE_LENGTH = 12;
       if (match.status === 'completed' && match.notes) {
-        const note = ta(match.notes).split('|').pop().trim().slice(0, 12);
+        const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
         if (note) {
           doc.font('Times-Roman').fontSize(5.5).fillColor('#6b7280')
              .text(note, vx + CR + 3, cy + 3, { width: 50, lineBreak: false });
@@ -1684,9 +1689,9 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
              .text(ta(match[match.winner].name), vx + CR + 3, cy - 4,
                { width: roundColW * 0.65, lineBreak: false });
         }
-        // Score / notes
+        // Score / notes – notes may be pipe-delimited; take the last segment
         if (match.status === 'completed' && match.notes) {
-          const note = ta(match.notes).split('|').pop().trim().slice(0, 12);
+          const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
           if (note) {
             doc.font('Times-Roman').fontSize(5.5).fillColor('#6b7280')
                .text(note, vx + CR + 3, cy + 3, { width: 50, lineBreak: false });

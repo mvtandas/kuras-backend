@@ -825,8 +825,8 @@ router.get("/:id/weighing-list", auth, async (req, res) => {
 
     const pageTitle = `TARTI LISTESI  |  ${turkishToAscii(organisation.tournamentName)}  |  ${weight} kg - ${turkishToAscii(gender)}`;
     const tableLeft = m;
-    // Reserve bottom space: signature (35px) + footer (20px) + gap (10px) = 65px
-    const bottomReserve = 65;
+    // Reserve space at page bottom for footer (20px) + inter-section gap (10px)
+    const bottomReserve = 30;
 
     let contentY = drawCompactPageHeader(doc, pageTitle);
     let rowY     = drawCompactTableHeaders(doc, tableLeft, headers, contentY);

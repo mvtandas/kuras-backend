@@ -1492,41 +1492,41 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
     const moment      = require('moment');
     const { turkishToAscii: ta } = require('../utils/pdfGenerator');
 
-    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
+    // ── Portrait A4, white background ──────────────────────────────────────
+    const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margin: 0 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=fixture-${req.params.id}.pdf`);
     doc.pipe(res);
 
-    const M  = 30;          // page margin
-    const PW = doc.page.width;   // 842
-    const PH = doc.page.height;  // 595
+    const M  = 25;    // page margin
+    const PW = 595;   // A4 portrait width
+    const PH = 842;   // A4 portrait height
 
-    // ── Page header (blue strip) ─────────────────────────────────────────────
-    const HDR_H = 40;
-    doc.rect(M, M, PW - 2 * M, HDR_H).fill('#1e3a8a');
-
+    // ── Header – plain bold text on white ──────────────────────────────────
     const startDate = org.tournamentDate
       ? moment(org.tournamentDate.startDate).format('DD.MM.YYYY')
       : '';
     const endDate = org.tournamentDate && org.tournamentDate.endDate
       ? moment(org.tournamentDate.endDate).format('DD.MM.YYYY')
       : startDate;
-    const cityName = org.tournamentPlace && org.tournamentPlace.city
+    const dateRange = startDate + (endDate && endDate !== startDate ? '-' + endDate : '');
+    const cityName  = org.tournamentPlace && org.tournamentPlace.city
       ? ta(org.tournamentPlace.city.name) : '';
 
     const titleLine = [
       ta(org.tournamentName),
-      startDate + (endDate && endDate !== startDate ? ' - ' + endDate : ''),
+      dateRange,
       cityName,
-      ta(tm.weightCategory) + ' kg - ' + ta(tm.gender),
-    ].filter(Boolean).join('  |  ');
+      ta(tm.weightCategory) + ' ' + ta(tm.gender),
+    ].filter(Boolean).join('  ');
 
-    doc.font('Times-Bold').fontSize(12).fillColor('#ffffff')
-       .text(titleLine, M + 8, M + 13, { width: PW - 2 * M - 110, lineBreak: false });
+    doc.font('Times-Bold').fontSize(13).fillColor('#000000')
+       .text(titleLine, M, M + 4, { width: PW - 2 * M - 85, lineBreak: false });
 
-    // Competitor count
-    const brackets     = tm.brackets || [];
+    const brackets      = tm.brackets || [];
     const loserBrackets = tm.loserBrackets || [];
+
+    // Count unique real competitors (non-BYE) in round 1
     const competitorCount = new Set(
       brackets.filter(b => b.roundNumber === 1)
         .flatMap(b => [b.player1, b.player2])
@@ -1534,29 +1534,33 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
         .map(p => String(p.participantId || p.name))
     ).size;
 
-    doc.font('Times-Roman').fontSize(9).fillColor('#93c5fd')
-       .text(`Sporcu: ${competitorCount}`, PW - M - 105, M + 15, { width: 95, align: 'right', lineBreak: false });
-
-    // ── Content area setup ───────────────────────────────────────────────────
-    const CONT_Y  = M + HDR_H + 5;
-    const CONT_H  = PH - CONT_Y - M;
-
-    // Layout split
-    const RESULTS_W  = 215;
-    const BRKT_W     = PW - 2 * M - RESULTS_W - 8;
-    const GRP_LBL_W  = 18;
-    const NAME_W     = 155;
-    const ROUNDS_W   = BRKT_W - GRP_LBL_W - NAME_W;
-    const NAME_END_X = M + GRP_LBL_W + NAME_W;
+    doc.font('Times-Roman').fontSize(8).fillColor('#888888')
+       .text(`Competitors: ${competitorCount}`, PW - M - 80, M + 8,
+         { width: 75, align: 'right', lineBreak: false });
 
     if (brackets.length === 0) {
-      doc.font('Times-Roman').fontSize(10).fillColor('#374151')
-         .text('Fikstür verisi henüz oluşturulmamış.', M + 10, CONT_Y + 20);
+      doc.font('Times-Roman').fontSize(10).fillColor('#000000')
+         .text('Fikstür verisi henüz oluşturulmamış.', M, M + 40);
       doc.end();
       return;
     }
 
-    // ── Group by round ───────────────────────────────────────────────────────
+    // ── Layout constants ────────────────────────────────────────────────────
+    const CONT_Y     = M + 28;              // content starts below header
+    const CONT_H     = PH - CONT_Y - M;     // full content height
+
+    // Right-side results table
+    const RESULTS_W  = 180;
+    const RESULTS_X  = PW - M - RESULTS_W;
+
+    // Bracket area (left side)
+    const BRKT_W     = RESULTS_X - M - 6;   // bracket area width
+    const GRP_LBL_W  = 15;                   // group label column (A, B, C…)
+    const NAME_W     = 160;                  // player name column
+    const NAME_END_X = M + GRP_LBL_W + NAME_W;
+    const ROUNDS_W   = BRKT_W - GRP_LBL_W - NAME_W; // remaining for bracket rounds
+
+    // ── Group brackets by round ─────────────────────────────────────────────
     const roundMap = {};
     for (const b of brackets) {
       if (!roundMap[b.roundNumber]) roundMap[b.roundNumber] = [];
@@ -1565,21 +1569,22 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
     for (const r of Object.keys(roundMap)) {
       roundMap[r].sort((a, b) => a.matchNumber - b.matchNumber);
     }
-    const maxRound    = Math.max(...Object.keys(roundMap).map(Number));
-    const r1Matches   = roundMap[1] || [];
-    const TOTAL_SLOTS = 2 * r1Matches.length;
+    const maxRound  = Math.max(...Object.keys(roundMap).map(Number));
+    const r1Matches = roundMap[1] || [];
+    const TOTAL_SLOTS = 2 * r1Matches.length; // total player slots in round 1
 
-    // Determine bracket height: if double elimination, reserve 44% for repechage at bottom
-    const MAIN_BRACKET_HEIGHT_RATIO = 0.56; // 56% for winner bracket; remaining 44% for repechage
+    // Split vertical space: main bracket vs repechage
+    // 0.22 offset positions the vBar slightly before the right edge of each
+    // round column so there's room for the winner label to its right.
+    const VBAR_OFFSET_RATIO = 0.22;
     const hasRepechage = tm.tournamentType === 'double_elimination' && loserBrackets.length > 0;
-    const MAIN_H = hasRepechage ? CONT_H * MAIN_BRACKET_HEIGHT_RATIO : CONT_H;
-    const SLOT_H = MAIN_H / Math.max(TOTAL_SLOTS, 1);
+    // Main bracket takes 56% if there's repechage; remaining 44% for repechage
+    const MAIN_BRACKET_HEIGHT_RATIO = 0.56;
+    const MAIN_H  = hasRepechage ? CONT_H * MAIN_BRACKET_HEIGHT_RATIO : CONT_H;
+    const SLOT_H  = MAIN_H / Math.max(TOTAL_SLOTS, 1);
 
     const roundColW = ROUNDS_W / Math.max(maxRound, 1);
-    // vBarX: x of the vertical connecting bar for round r.
-    // 0.22 offsets the bar slightly left within the round column so the
-    // winner-name label fits to the right of the match circle.
-    const VBAR_OFFSET_RATIO = 0.22;
+    // vBarX: x-position of the vertical connecting bar for bracket round r
     const vBarX = (r) => NAME_END_X + r * roundColW - roundColW * VBAR_OFFSET_RATIO;
 
     // ── Compute match centre-Y positions ────────────────────────────────────
@@ -1597,61 +1602,99 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
       });
     }
 
-    // ── Draw round-1 matches (player names + lines) ──────────────────────────
-    const GRP_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-    doc.lineWidth(0.75).strokeColor('#374151');
+    // ── Helper: format player name for bracket ──────────────────────────────
+    // Produces "SURNAME, City/Club" matching reference image style
+    function fmtPlayer(p) {
+      if (!p || p.isBye || p.name === 'BYE') return '';
+      let s = ta(p.name);
+      const parts = [];
+      if (p.city)  parts.push(ta(p.city));
+      if (p.club && p.club !== p.city) parts.push(ta(p.club));
+      if (parts.length) s += ', ' + parts.join('/');
+      return s;
+    }
 
-    r1Matches.forEach((match, idx) => {
-      const cy   = matchCY[match.matchNumber];
-      const p1Y  = cy - SLOT_H / 2;
-      const p2Y  = cy + SLOT_H / 2;
-      const vx   = vBarX(1);
-      const CR   = Math.min(8, SLOT_H * 0.27);
-      const fs   = SLOT_H < 20 ? 6.5 : 8;
+    // ── Helper: draw one bracket match ──────────────────────────────────────
+    // Draws player lines, vertical bar, match circle, winner label, score.
+    function drawBracketMatch(match, cy, slotH, vx, roundColWidth, p1src, p2src) {
+      const p1Y = cy - slotH / 2;
+      const p2Y = cy + slotH / 2;
+      const CR  = Math.min(9, slotH * 0.28);     // circle radius
+      const fs  = Math.max(6, Math.min(8, slotH * 0.14)); // font size
 
-      // Group label
-      doc.font('Times-Bold').fontSize(9).fillColor('#1e3a8a')
-         .text(GRP_LABELS[idx] || '', M + 1, cy - 6, { width: GRP_LBL_W - 2, lineBreak: false });
+      // Player 1 name above its line
+      const name1 = fmtPlayer(p1src);
+      if (name1) {
+        doc.font('Times-Roman').fontSize(fs).fillColor('#000000')
+           .text(name1, NAME_END_X - NAME_W + 1, p1Y - fs - 1,
+             { width: NAME_W - 2, lineBreak: false });
+      }
+      // Player 2 name above its line
+      const name2 = fmtPlayer(p2src);
+      if (name2) {
+        doc.font('Times-Roman').fontSize(fs).fillColor('#000000')
+           .text(name2, NAME_END_X - NAME_W + 1, p2Y - fs - 1,
+             { width: NAME_W - 2, lineBreak: false });
+      }
 
-      // Player names
-      const fmtP = (p) => p && !p.isBye && p.name !== 'BYE'
-        ? `${ta(p.name)}${p.city ? ' / ' + ta(p.city) : ''}` : 'BYE';
-
-      doc.font('Times-Roman').fontSize(fs).fillColor('#1f2937')
-         .text(fmtP(match.player1), M + GRP_LBL_W, p1Y - fs * 0.8, { width: NAME_W - 4, lineBreak: false });
-      doc.font('Times-Roman').fontSize(fs).fillColor('#1f2937')
-         .text(fmtP(match.player2), M + GRP_LBL_W, p2Y - fs * 0.8, { width: NAME_W - 4, lineBreak: false });
-
-      // Horizontal player lines → vBar
+      // Horizontal lines from name-end to vBar
+      doc.lineWidth(0.6).strokeColor('#000000');
       doc.moveTo(NAME_END_X, p1Y).lineTo(vx, p1Y).stroke();
       doc.moveTo(NAME_END_X, p2Y).lineTo(vx, p2Y).stroke();
-      // Vertical bar
+      // Vertical connecting bar
       doc.moveTo(vx, p1Y).lineTo(vx, p2Y).stroke();
 
-      // Match number circle
-      doc.circle(vx, cy, CR).fillAndStroke('#e5e7eb', '#374151');
-      doc.font('Times-Bold').fontSize(6).fillColor('#1f2937')
-         .text(String(match.matchNumber), vx - CR, cy - 4, { width: CR * 2, align: 'center', lineBreak: false });
+      // Match circle: white fill, black border
+      doc.circle(vx, cy, CR).fillAndStroke('#ffffff', '#000000');
+      doc.font('Times-Bold').fontSize(Math.max(5, CR * 0.85)).fillColor('#000000')
+         .text(String(match.matchNumber), vx - CR, cy - CR * 0.6,
+           { width: CR * 2, align: 'center', lineBreak: false });
 
-      // Winner name after circle
-      if (match.winner && match[match.winner]) {
-        doc.font('Times-Bold').fontSize(7).fillColor('#1e3a8a')
-           .text(ta(match[match.winner].name), vx + CR + 3, cy - 4,
-             { width: roundColW * 0.65, lineBreak: false });
-      }
-      // Score / notes – notes may be pipe-delimited ("BYE | 10-0"); take the last segment
-      const MAX_NOTE_LENGTH = 12;
+      // Score / notes – notes may be pipe-delimited; use the last segment
+      // Notes format (stored as "BYE | 00 10" or just "00 10")
+      const MAX_NOTE_LENGTH = 10;
       if (match.status === 'completed' && match.notes) {
         const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
         if (note) {
-          doc.font('Times-Roman').fontSize(5.5).fillColor('#6b7280')
-             .text(note, vx + CR + 3, cy + 3, { width: 50, lineBreak: false });
+          doc.font('Times-Roman').fontSize(Math.max(5, CR * 0.7)).fillColor('#888888')
+             .text(note, vx - CR - 2, cy + CR * 0.5,
+               { width: CR * 2 + 4, align: 'center', lineBreak: false });
         }
       }
 
-      // Winner output line to round 2
-      if (match.nextMatchNumber != null && vBarX(2) < NAME_END_X + ROUNDS_W) {
-        doc.moveTo(vx, cy).lineTo(vBarX(2), cy).stroke();
+      // Winner surname (bold) on the output line after the circle
+      const winner = match.winner ? match[match.winner] : null;
+      if (winner && winner.name) {
+        // Show only last "word" (surname) to keep it compact
+        const surname = ta(winner.name).split(' ').pop();
+        doc.font('Times-Bold').fontSize(Math.max(6, fs)).fillColor('#000000')
+           .text(surname, vx + CR + 3, cy - fs * 0.9,
+             { width: roundColWidth * 0.62, lineBreak: false });
+      }
+    }
+
+    // ── Draw group labels ────────────────────────────────────────────────────
+    const GRP_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+
+    r1Matches.forEach((match, idx) => {
+      const cy = matchCY[match.matchNumber];
+      if (GRP_LABELS[idx]) {
+        doc.font('Times-Bold').fontSize(11).fillColor('#000000')
+           .text(GRP_LABELS[idx], M, cy - 6,
+             { width: GRP_LBL_W, lineBreak: false });
+      }
+    });
+
+    // ── Draw round 1 ────────────────────────────────────────────────────────
+    r1Matches.forEach(match => {
+      const cy = matchCY[match.matchNumber];
+      drawBracketMatch(match, cy, SLOT_H, vBarX(1), roundColW,
+        match.player1, match.player2);
+
+      // Output line to round 2
+      if (match.nextMatchNumber != null) {
+        doc.lineWidth(0.6).strokeColor('#000000');
+        doc.moveTo(vBarX(1), cy).lineTo(vBarX(2), cy).stroke();
       }
     });
 
@@ -1661,62 +1704,106 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
         const cy = matchCY[match.matchNumber];
         if (cy === undefined) return;
 
-        const vx  = vBarX(r);
-        const CR  = Math.min(8, SLOT_H * 0.27);
-
         const children = brackets
           .filter(b => b.nextMatchNumber === match.matchNumber)
           .sort((a, b) => (matchCY[a.matchNumber] || 0) - (matchCY[b.matchNumber] || 0));
 
-        // Vertical bar connecting child outputs
+        // Vertical bar connecting the two child-output lines into this match
+        doc.lineWidth(0.6).strokeColor('#000000');
         if (children.length >= 2) {
           const y1 = matchCY[children[0].matchNumber];
           const y2 = matchCY[children[children.length - 1].matchNumber];
           if (y1 !== undefined && y2 !== undefined) {
-            doc.moveTo(vx, y1).lineTo(vx, y2).stroke();
+            doc.moveTo(vBarX(r), y1).lineTo(vBarX(r), y2).stroke();
           }
         }
 
-        // Match circle
-        doc.circle(vx, cy, CR).fillAndStroke('#e5e7eb', '#374151');
-        doc.font('Times-Bold').fontSize(6).fillColor('#1f2937')
-           .text(String(match.matchNumber), vx - CR, cy - 4,
+        const CR = Math.min(9, SLOT_H * 0.28);
+        doc.circle(vBarX(r), cy, CR).fillAndStroke('#ffffff', '#000000');
+        doc.font('Times-Bold').fontSize(Math.max(5, CR * 0.85)).fillColor('#000000')
+           .text(String(match.matchNumber), vBarX(r) - CR, cy - CR * 0.6,
              { width: CR * 2, align: 'center', lineBreak: false });
 
-        // Winner name
-        if (match.winner && match[match.winner]) {
-          doc.font('Times-Bold').fontSize(7).fillColor('#1e3a8a')
-             .text(ta(match[match.winner].name), vx + CR + 3, cy - 4,
-               { width: roundColW * 0.65, lineBreak: false });
-        }
-        // Score / notes – notes may be pipe-delimited; take the last segment
+        const MAX_NOTE_LENGTH = 10;
         if (match.status === 'completed' && match.notes) {
           const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
           if (note) {
-            doc.font('Times-Roman').fontSize(5.5).fillColor('#6b7280')
-               .text(note, vx + CR + 3, cy + 3, { width: 50, lineBreak: false });
+            doc.font('Times-Roman').fontSize(Math.max(5, CR * 0.7)).fillColor('#888888')
+               .text(note, vBarX(r) - CR - 2, cy + CR * 0.5,
+                 { width: CR * 2 + 4, align: 'center', lineBreak: false });
           }
+        }
+
+        const winner = match.winner ? match[match.winner] : null;
+        if (winner && winner.name) {
+          const surname = ta(winner.name).split(' ').pop();
+          doc.font('Times-Bold').fontSize(Math.max(6, Math.min(8, SLOT_H * 0.14))).fillColor('#000000')
+             .text(surname, vBarX(r) + CR + 3, cy - Math.min(8, SLOT_H * 0.14) * 0.9,
+               { width: roundColW * 0.62, lineBreak: false });
         }
 
         // Output line to next round
         if (match.nextMatchNumber != null && r < maxRound) {
-          doc.moveTo(vx, cy).lineTo(vBarX(r + 1), cy).stroke();
+          doc.moveTo(vBarX(r), cy).lineTo(vBarX(r + 1), cy).stroke();
         }
       });
     }
 
+    // ── Results table (right column, top-aligned with bracket) ───────────────
+    // Plain black-bordered table matching reference image style
+    const RES_ROW_H  = 16;
+    const RES_POS_W  = 24;
+    const RES_NAME_W = RESULTS_W - RES_POS_W;
+
+    let resY = CONT_Y;
+
+    // "Results" header – plain bold text, no colored box
+    doc.font('Times-Bold').fontSize(10).fillColor('#000000')
+       .text('Results', RESULTS_X, resY + 2, { width: RESULTS_W, lineBreak: false });
+    resY += 14;
+
+    // Column header row
+    doc.rect(RESULTS_X, resY, RESULTS_W, RES_ROW_H).lineWidth(0.5).stroke('#000000');
+    doc.font('Times-Bold').fontSize(7.5).fillColor('#000000')
+       .text('Pos', RESULTS_X + 3, resY + 4, { width: RES_POS_W - 4, lineBreak: false })
+       .text('Name', RESULTS_X + RES_POS_W + 3, resY + 4,
+         { width: RES_NAME_W - 6, lineBreak: false });
+    // Divider between Pos and Name columns
+    doc.moveTo(RESULTS_X + RES_POS_W, resY)
+       .lineTo(RESULTS_X + RES_POS_W, resY + RES_ROW_H)
+       .lineWidth(0.4).stroke('#000000');
+    resY += RES_ROW_H;
+
+    const placements = buildPlacements(brackets, loserBrackets, tm.tournamentType);
+    placements.forEach((p, idx) => {
+      // Alternate row background (very light gray on even rows)
+      if (idx % 2 === 0) {
+        doc.rect(RESULTS_X, resY, RESULTS_W, RES_ROW_H).fill('#f5f5f5');
+      }
+      doc.rect(RESULTS_X, resY, RESULTS_W, RES_ROW_H).lineWidth(0.4).stroke('#000000');
+      doc.moveTo(RESULTS_X + RES_POS_W, resY)
+         .lineTo(RESULTS_X + RES_POS_W, resY + RES_ROW_H)
+         .lineWidth(0.4).stroke('#000000');
+
+      doc.font('Times-Bold').fontSize(8).fillColor('#000000')
+         .text(p.rank, RESULTS_X + 3, resY + 4, { width: RES_POS_W - 4, lineBreak: false });
+      doc.font('Times-Roman').fontSize(7.5).fillColor('#000000')
+         .text(ta(p.name), RESULTS_X + RES_POS_W + 3, resY + 3.5,
+           { width: RES_NAME_W - 6, lineBreak: false });
+      resY += RES_ROW_H;
+    });
+
     // ── Repechage section (double elimination) ───────────────────────────────
     if (hasRepechage) {
-      const RPH_Y = CONT_Y + MAIN_H + 8;
-      const RPH_H = CONT_H - MAIN_H - 12;
+      const RPH_Y = CONT_Y + MAIN_H + 10;
+      const RPH_H = CONT_H - MAIN_H - 14;
 
-      // Dashed divider + label
+      // Section label – plain italic text
+      doc.font('Times-Roman').fontSize(8).fillColor('#555555')
+         .text('Repechage', M, RPH_Y - 2, { lineBreak: false });
+      // Thin horizontal rule above repechage
       doc.moveTo(M, RPH_Y - 4).lineTo(M + BRKT_W, RPH_Y - 4)
-         .lineWidth(0.5).dash(4, { space: 3 }).strokeColor('#9ca3af').stroke();
-      doc.undash().lineWidth(0.75).strokeColor('#374151');
-
-      doc.font('Times-Bold').fontSize(7.5).fillColor('#6b7280')
-         .text('REPECHAGE', M, RPH_Y - 14, { lineBreak: false });
+         .lineWidth(0.4).strokeColor('#aaaaaa').stroke();
 
       // Group loser brackets by round
       const lbMap = {};
@@ -1726,15 +1813,15 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
       }
       for (const r of Object.keys(lbMap)) lbMap[r].sort((a, b) => a.matchNumber - b.matchNumber);
 
-      const lbMaxR   = Math.max(...Object.keys(lbMap).map(Number));
-      const lbR1     = lbMap[1] || [];
-      const LB_SLOTS = 2 * lbR1.length;
-      const LB_SLOT  = RPH_H / Math.max(LB_SLOTS, 1);
-      const lbRCW    = ROUNDS_W / Math.max(lbMaxR, 1);
-      const lbVBarX  = (r) => NAME_END_X + r * lbRCW - lbRCW * 0.22;
+      const lbMaxR = Math.max(...Object.keys(lbMap).map(Number));
+      const lbR1   = lbMap[1] || [];
+      const LB_SLOT = RPH_H / Math.max(2 * lbR1.length, 1);
+      const lbRCW   = ROUNDS_W / Math.max(lbMaxR, 1);
+      const lbVBarX = (r) => NAME_END_X + r * lbRCW - lbRCW * VBAR_OFFSET_RATIO;
 
+      // Compute repechage match Y positions
       const lbCY = {};
-      lbR1.forEach((m, i) => { lbCY[m.matchNumber] = RPH_Y + (2 * i + 1) * LB_SLOT; });
+      lbR1.forEach((m, i) => { lbCY[m.matchNumber] = RPH_Y + 8 + (2 * i + 1) * LB_SLOT; });
       for (let r = 2; r <= lbMaxR; r++) {
         (lbMap[r] || []).forEach(m => {
           const children = loserBrackets.filter(b => b.nextMatchNumber === m.matchNumber);
@@ -1746,36 +1833,13 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
       }
 
       // Draw repechage round 1
-      lbR1.forEach((match) => {
-        const cy  = lbCY[match.matchNumber];
-        const p1Y = cy - LB_SLOT / 2;
-        const p2Y = cy + LB_SLOT / 2;
-        const vx  = lbVBarX(1);
-        const CR  = Math.min(7, LB_SLOT * 0.27);
-        const fs  = LB_SLOT < 16 ? 6 : 7;
-
-        const fmtP = (p) => p && !p.isBye && p.name !== 'BYE' ? ta(p.name) : 'TBD';
-        doc.font('Times-Roman').fontSize(fs).fillColor('#374151')
-           .text(fmtP(match.player1), M + GRP_LBL_W, p1Y - fs * 0.8, { width: NAME_W - 4, lineBreak: false });
-        doc.font('Times-Roman').fontSize(fs).fillColor('#374151')
-           .text(fmtP(match.player2), M + GRP_LBL_W, p2Y - fs * 0.8, { width: NAME_W - 4, lineBreak: false });
-
-        doc.moveTo(NAME_END_X, p1Y).lineTo(vx, p1Y).stroke();
-        doc.moveTo(NAME_END_X, p2Y).lineTo(vx, p2Y).stroke();
-        doc.moveTo(vx, p1Y).lineTo(vx, p2Y).stroke();
-
-        doc.circle(vx, cy, CR).fillAndStroke('#f3f4f6', '#9ca3af');
-        doc.font('Times-Bold').fontSize(5.5).fillColor('#374151')
-           .text(String(match.matchNumber), vx - CR, cy - 3.5,
-             { width: CR * 2, align: 'center', lineBreak: false });
-
-        if (match.winner && match[match.winner]) {
-          doc.font('Times-Bold').fontSize(6.5).fillColor('#374151')
-             .text(ta(match[match.winner].name), vx + CR + 2, cy - 3.5,
-               { width: lbRCW * 0.65, lineBreak: false });
-        }
+      lbR1.forEach(match => {
+        const cy = lbCY[match.matchNumber];
+        drawBracketMatch(match, cy, LB_SLOT, lbVBarX(1), lbRCW,
+          match.player1, match.player2);
         if (match.nextMatchNumber != null) {
-          doc.moveTo(vx, cy).lineTo(lbVBarX(2), cy).stroke();
+          doc.lineWidth(0.6).strokeColor('#000000');
+          doc.moveTo(lbVBarX(1), cy).lineTo(lbVBarX(2), cy).stroke();
         }
       });
 
@@ -1784,76 +1848,55 @@ router.get("/:id/fixture-pdf", auth, async (req, res) => {
         (lbMap[r] || []).forEach(match => {
           const cy = lbCY[match.matchNumber];
           if (cy === undefined) return;
-          const vx  = lbVBarX(r);
-          const CR  = Math.min(7, LB_SLOT * 0.27);
 
           const children = loserBrackets
             .filter(b => b.nextMatchNumber === match.matchNumber)
             .sort((a, b) => (lbCY[a.matchNumber] || 0) - (lbCY[b.matchNumber] || 0));
 
+          doc.lineWidth(0.6).strokeColor('#000000');
           if (children.length >= 2) {
             const y1 = lbCY[children[0].matchNumber];
             const y2 = lbCY[children[children.length - 1].matchNumber];
             if (y1 !== undefined && y2 !== undefined) {
-              doc.moveTo(vx, y1).lineTo(vx, y2).stroke();
+              doc.moveTo(lbVBarX(r), y1).lineTo(lbVBarX(r), y2).stroke();
             }
           }
 
-          doc.circle(vx, cy, CR).fillAndStroke('#f3f4f6', '#9ca3af');
-          doc.font('Times-Bold').fontSize(5.5).fillColor('#374151')
-             .text(String(match.matchNumber), vx - CR, cy - 3.5,
+          const CR = Math.min(9, LB_SLOT * 0.28);
+          doc.circle(lbVBarX(r), cy, CR).fillAndStroke('#ffffff', '#000000');
+          doc.font('Times-Bold').fontSize(Math.max(5, CR * 0.85)).fillColor('#000000')
+             .text(String(match.matchNumber), lbVBarX(r) - CR, cy - CR * 0.6,
                { width: CR * 2, align: 'center', lineBreak: false });
 
-          if (match.winner && match[match.winner]) {
-            doc.font('Times-Bold').fontSize(6.5).fillColor('#374151')
-               .text(ta(match[match.winner].name), vx + CR + 2, cy - 3.5,
-                 { width: lbRCW * 0.65, lineBreak: false });
+          const MAX_NOTE_LENGTH = 10;
+          if (match.status === 'completed' && match.notes) {
+            const note = ta(match.notes).split('|').pop().trim().slice(0, MAX_NOTE_LENGTH);
+            if (note) {
+              doc.font('Times-Roman').fontSize(Math.max(5, CR * 0.7)).fillColor('#888888')
+                 .text(note, lbVBarX(r) - CR - 2, cy + CR * 0.5,
+                   { width: CR * 2 + 4, align: 'center', lineBreak: false });
+            }
           }
+
+          const winner = match.winner ? match[match.winner] : null;
+          if (winner && winner.name) {
+            const surname = ta(winner.name).split(' ').pop();
+            const fs = Math.max(6, Math.min(8, LB_SLOT * 0.14));
+            doc.font('Times-Bold').fontSize(fs).fillColor('#000000')
+               .text(surname, lbVBarX(r) + CR + 3, cy - fs * 0.9,
+                 { width: lbRCW * 0.62, lineBreak: false });
+          }
+
           if (match.nextMatchNumber != null && r < lbMaxR) {
-            doc.moveTo(vx, cy).lineTo(lbVBarX(r + 1), cy).stroke();
+            doc.moveTo(lbVBarX(r), cy).lineTo(lbVBarX(r + 1), cy).stroke();
           }
         });
       }
     }
 
-    // ── Results table (right column) ─────────────────────────────────────────
-    const RES_X = M + BRKT_W + 8;
-    let resY    = CONT_Y;
-
-    // Header
-    doc.rect(RES_X, resY, RESULTS_W, 20).fill('#1e3a8a');
-    doc.font('Times-Bold').fontSize(10).fillColor('#ffffff')
-       .text('SONUCLAR', RES_X, resY + 5, { width: RESULTS_W, align: 'center', lineBreak: false });
-    resY += 20;
-
-    // Column definitions
-    const posW  = 28;
-    const nameW = RESULTS_W - posW - 4;
-
-    // Column headers
-    doc.rect(RES_X, resY, posW, 15).fill('#374151');
-    doc.rect(RES_X + posW, resY, nameW + 4, 15).fill('#374151');
-    doc.font('Times-Bold').fontSize(7.5).fillColor('#ffffff')
-       .text('Pos', RES_X + 2, resY + 4, { width: posW - 4, lineBreak: false })
-       .text('Ad Soyad', RES_X + posW + 3, resY + 4, { width: nameW, lineBreak: false });
-    resY += 15;
-
-    const placements = buildPlacements(brackets, loserBrackets, tm.tournamentType);
-    placements.forEach((p, idx) => {
-      const bg = idx % 2 === 0 ? '#f9fafb' : '#ffffff';
-      const rh = 15;
-      doc.rect(RES_X, resY, RESULTS_W, rh).fill(bg)
-         .rect(RES_X, resY, RESULTS_W, rh).lineWidth(0.3).stroke('#d1d5db');
-      doc.font('Times-Bold').fontSize(8).fillColor('#1f2937')
-         .text(p.rank, RES_X + 3, resY + 4, { width: posW - 4, lineBreak: false });
-      doc.font('Times-Roman').fontSize(7.5).fillColor('#1f2937')
-         .text(ta(p.name), RES_X + posW + 3, resY + 3.5, { width: nameW - 4, lineBreak: false });
-      resY += rh;
-    });
-
     // ── Footer ────────────────────────────────────────────────────────────────
-    doc.font('Times-Roman').fontSize(7).fillColor('#9ca3af')
-       .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, M, PH - M - 10,
+    doc.font('Times-Roman').fontSize(6.5).fillColor('#aaaaaa')
+       .text(`Olusturulma: ${moment().format('DD.MM.YYYY HH:mm')}`, M, PH - M - 8,
          { width: PW - 2 * M, align: 'center', lineBreak: false });
 
     doc.end();

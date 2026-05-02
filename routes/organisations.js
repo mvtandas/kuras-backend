@@ -925,7 +925,7 @@ router.get("/:id/all-weighing-list", auth, async (req, res) => {
       const [wA, gA] = a.split('-');
       const [wB, gB] = b.split('-');
       if (parseInt(wA) !== parseInt(wB)) return parseInt(wA) - parseInt(wB);
-      return gA === 'Kadin' ? -1 : 1;
+      return gA === 'Kadın' ? -1 : 1;
     });
 
     // Sütun tanımları – 5 sütun → portrait
